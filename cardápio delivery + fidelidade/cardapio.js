@@ -343,6 +343,7 @@ function openItemDetail(itemId){
           <div class="sabores-titulo">Escolha 2 sabores <span id="saboresCont">0/2</span></div>
           <div class="sabores-lista" id="saboresLista"></div>
         </div>` : ""}
+        ${adicionaisDoItem(item).length ? `<div class="adc-box" id="detailAdicionais"></div>` : ""}
         <div class="detail-footer">
           <span class="detail-price" id="detailPrice">${money(temVariacao ? parseFloat(opcoes[0].preco || 0) : parseFloat(item.preco || 0))}</span>
           <button class="checkout-btn" id="detailAddBtn">Adicionar</button>
@@ -374,7 +375,34 @@ function openItemDetail(itemId){
       return sabores.length ? Math.max(...sabores.map(n => precoDoSabor(n, op))) : 0;
     return parseFloat(op.preco || 0);
   };
-  const atualizarPreco = () => { const v = precoAtual(); document.getElementById("detailPrice").textContent = v > 0 ? money(v) : "R$ —"; };
+  // adicionais da categoria: − e + em cada um, com o limite de cada um e o da lista
+  const listasAdc = adicionaisDoItem(item);
+  const adcQtd = new Map();
+  const adcEscolhidos = () => listasAdc.flatMap(l => l.itens).filter(a => adcQtd.get(a.id) > 0).map(a => ({ id: a.id, nome: a.nome, preco: a.preco, qtd: adcQtd.get(a.id) }));
+  const adcExtra = () => adcEscolhidos().reduce((t, a) => t + a.preco * a.qtd, 0);
+  function montarAdicionais(){
+    const box = document.getElementById("detailAdicionais");
+    if(!box) return;
+    box.innerHTML = `<div class="adc-titulo">Quer algum adicional?</div>` + listasAdc.map(l => {
+      const naLista = l.itens.reduce((t, a) => t + (adcQtd.get(a.id) || 0), 0);
+      return `<div class="adc-grupo"><div class="adc-grupo-topo"><b>${escHtml(l.nome)}</b>${l.max ? `<small>até ${l.max}</small>` : ""}</div>
+        ${l.itens.map(a => { const q = adcQtd.get(a.id) || 0; return `
+          <div class="adc-linha${q ? " on" : ""}">
+            <span class="adc-nome">${escHtml(a.nome)}</span>
+            <span class="adc-valor">${a.preco > 0 ? "+ " + money(a.preco) : "grátis"}</span>
+            <span class="adc-qtd"><button type="button" data-adc-menos="${escHtml(a.id)}" ${q ? "" : "disabled"} aria-label="Menos ${escHtml(a.nome)}">−</button><b>${q}</b><button type="button" data-adc-mais="${escHtml(a.id)}" ${q >= (a.max || 10) || (l.max && naLista >= l.max) ? "disabled" : ""} aria-label="Mais ${escHtml(a.nome)}">+</button></span>
+          </div>`; }).join("")}</div>`;
+    }).join("");
+  }
+  document.getElementById("detailAdicionais")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-adc-mais],[data-adc-menos]");
+    if(!b || b.disabled) return;
+    const id = b.dataset.adcMais || b.dataset.adcMenos;
+    adcQtd.set(id, Math.max(0, (adcQtd.get(id) || 0) + (b.dataset.adcMais ? 1 : -1)));
+    montarAdicionais(); atualizarPreco();
+  });
+  montarAdicionais();
+  const atualizarPreco = () => { const v = precoAtual(); document.getElementById("detailPrice").textContent = v > 0 ? money(v + adcExtra()) : "R$ —"; };
   function montarSabores(){
     const box = document.getElementById("detailSabores");
     if(!box) return;
@@ -430,11 +458,12 @@ function openItemDetail(itemId){
         box.scrollIntoView({ behavior:"smooth", block:"center" });
         return;
       }
-      addVariationToCart(item, op, op.texto_livre ? sabores : null, precoAtual());
+      addVariationToCart(item, op, op.texto_livre ? sabores : null, precoAtual(), adcEscolhidos());
     }else{
-      const existing = CART.find(c => String(c.id) === String(item.id));
+      const adc = adcEscolhidos(), id = String(item.id) + assinaturaAdc(adc);
+      const existing = CART.find(c => String(c.id) === id);
       if(existing){ existing.qty++; }
-      else{ CART.push({ id:item.id, item_id:item.id, opcao_id:null, nome:item.nome, preco:parseFloat(item.preco || 0), qty:1 }); }
+      else{ CART.push({ id: adc.length ? id : item.id, item_id:item.id, opcao_id:null, nome:item.nome, preco:parseFloat(item.preco || 0) + somaAdc(adc), ...(adc.length ? { adicionais: adc } : {}), qty:1 }); }
       updateCartUI();
     }
     flyToCart(e.currentTarget);
@@ -459,9 +488,16 @@ function closeItemDetail(wrap){
   }
 }
 
-function addVariationToCart(item, opcao, sabores, preco){
+// adicionais: o que vale pro item (pela categoria; "sem adicionais" no item não tem)
+const chaveCat = (c) => String(c || "").trim().toLowerCase();
+function adicionaisDoItem(item){ return item?.sem_adicionais ? [] : (ADICIONAIS[chaveCat(item?.categoria)] || []); }
+const somaAdc = (adc) => (adc || []).reduce((t, a) => t + a.preco * a.qtd, 0);
+// mesma combinação (item + opção + sabores + adicionais) = mesma linha; diferente = linha nova
+const assinaturaAdc = (adc) => (adc && adc.length) ? "__adc:" + adc.map(a => `${a.id}x${a.qtd}`).sort().join(",") : "";
+
+function addVariationToCart(item, opcao, sabores, preco, adc = []){
   const doisSabores = Array.isArray(sabores) && sabores.length === 2;
-  const cartId = `${item.id}__${opcao.nome}` + (doisSabores ? `__${[...sabores].sort().join("+")}` : "");
+  const cartId = `${item.id}__${opcao.nome}` + (doisSabores ? `__${[...sabores].sort().join("+")}` : "") + assinaturaAdc(adc);
   // mesmo nome do cardápio da mesa: "Pizza dois sabores Grande — Calabresa + Mussarela"
   const nomeCompleto = doisSabores
     ? `${item.nome}${item.nome.toLowerCase().includes(String(opcao.nome).toLowerCase()) ? "" : " " + opcao.nome} — ${sabores.join(" + ")}`
@@ -471,13 +507,14 @@ function addVariationToCart(item, opcao, sabores, preco){
   const existing = CART.find(c => c.id === cartId);
   if(existing){ existing.qty++; }
   else{ CART.push({ id:cartId, item_id:item.id, opcao_id:opcao.id || null, ...(saborIds ? { sabores:saborIds } : {}),
-    nome:nomeCompleto, preco: preco ?? parseFloat(opcao.preco || 0), qty:1 }); }
+    nome:nomeCompleto, preco: (preco ?? parseFloat(opcao.preco || 0)) + somaAdc(adc), ...(adc && adc.length ? { adicionais: adc } : {}), qty:1 }); }
   updateCartUI();
 }
 
 function addToCart(id, evt){
   const item = MENU.find(i => String(i.id) === String(id));
   if(!item) return;
+if(adicionaisDoItem(item).length && !CART.some(c => String(c.id) === String(id))) return openItemDetail(id); // oferece os adicionais
   const existing = CART.find(c => String(c.id) === String(id));
   if(existing){ existing.qty++; }
   else{ CART.push({ id:item.id, item_id:item.id, opcao_id:null, nome:item.nome, preco:parseFloat(item.preco||0), qty:1 }); }
@@ -563,17 +600,22 @@ function updateCartUI(){
     body.innerHTML = `<div class="drawer-empty">SEU CARRINHO ESTÁ VAZIO<br>— adicione itens do cardápio —</div>`;
     document.getElementById("goCheckoutBtn").disabled = true;
   }else{
-    body.innerHTML = CART.map(c => `
+    body.innerHTML = CART.map((c, i) => `
       <div class="receipt-item">
-        <div class="ri-name">${c.nome}</div>
+        <div class="ri-name">${escHtml(c.nome)}</div>
         <div class="qty-ctrl">
-          <button class="qty-btn" data-qty-minus="${c.id}" aria-label="Diminuir">${c.qty === 1 ? "×" : "−"}</button>
+          <button class="qty-btn" data-qty-minus="${escHtml(c.id)}" aria-label="Diminuir">${c.qty === 1 ? "×" : "−"}</button>
           <span class="qty-num">${c.qty}</span>
-          <button class="qty-btn" data-qty-plus="${c.id}" aria-label="Aumentar">+</button>
+          <button class="qty-btn" data-qty-plus="${escHtml(c.id)}" aria-label="Aumentar">+</button>
         </div>
         <span class="ri-price">${money(c.preco * c.qty)}</span>
+        <div class="ri-extra">
+          ${(c.adicionais || []).map(a => `<div class="ri-adc">+ ${a.qtd > 1 ? a.qtd + "x " : ""}${escHtml(a.nome)}</div>`).join("")}
+          <input class="ri-obs" data-obs="${i}" maxlength="140" value="${escHtml(c.obs || "")}" placeholder="Alguma observação para este item?" aria-label="Observação de ${escHtml(c.nome)}">
+        </div>
       </div>
     `).join("");
+    body.querySelectorAll("[data-obs]").forEach(inp => inp.oninput = () => { const c = CART[+inp.dataset.obs]; if(c) c.obs = inp.value; });
     document.getElementById("goCheckoutBtn").disabled = false;
 
     gsap.fromTo(body.querySelectorAll(".receipt-item"),
@@ -786,6 +828,8 @@ function basePayload(v, extra){
       item_id: c.item_id ?? String(c.id).split("__")[0],
       opcao_id: c.opcao_id || null,
       ...(c.sabores ? { sabores: c.sabores } : {}),
+      ...(c.adicionais && c.adicionais.length ? { adicionais: c.adicionais.map(a => ({ id: a.id, qtd: a.qtd })) } : {}),
+      ...(String(c.obs || "").trim() ? { obs: String(c.obs).trim().slice(0, 140) } : {}),
       qtd: c.qty
     })),
     total_price: cartTotal(),
