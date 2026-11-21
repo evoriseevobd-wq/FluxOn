@@ -1348,7 +1348,7 @@ async function submitOrder() {
       const el = document.getElementById('modal-preco');
       if (el) el.textContent = formatCurrency(total);
       const btn = document.getElementById('btn-adicionar-modal');
-      if (btn && (window._adcListas || []).length) btn.textContent = total > 0 ? `+ Adicionar · ${formatCurrency(total)}` : '+ Adicionar ao carrinho';
+      if (btn && (window._adcListas || []).length) btn.textContent = total > 0 ? ` Adicionar · ${formatCurrency(total)}` : ' Adicionar ao carrinho';
     }
     document.addEventListener('click', (e) => {
       const b = e.target.closest('#qr-adc [data-adc-mais], #qr-adc [data-adc-menos]');
@@ -1549,7 +1549,7 @@ function openItemDetailModal(item) {
               flex:2; padding:14px; border-radius:var(--radius-sm);
               border:none; background:var(--ink); color:var(--white);
               font-family:'Outfit',sans-serif; font-size:14px; font-weight:600;
-              cursor:pointer;">+ Adicionar ao carrinho</button>
+              cursor:pointer;"> Adicionar ao carrinho</button>
             ` : ''}
           </div>
         </div>
@@ -1906,7 +1906,7 @@ function openDrawerMesaOcupada(pedido) {
           border:none; background:var(--ink); color:#fff;
           font-family:'Outfit',sans-serif; font-size:15px; font-weight:600;
           cursor:pointer;">
-          + Adicionar itens ao pedido
+           Adicionar itens ao pedido
         </button>
         <button onclick="mostrarTelaBloqueio()" style="
   width:100%; padding:15px; border-radius:var(--radius-sm);
