@@ -46,6 +46,7 @@ let RESTAURANT_CONFIG = {};
 let RESTAURANT_CATEGORIAS = []; 
 let RESTAURANT_HORARIOS_STATUS = { aberto:false, fechamento_atual:null };
 let CART = []; 
+let ADICIONAIS = {}; // categoria → listas de adicionais (uma vez só, não repete em cada item)
 let SELECTED_PAY = null;
 
 /* ============================================================
@@ -81,11 +82,13 @@ async function fetchMenu(){
     throw new Error("Não encontramos um restaurante cadastrado para este link. Confira o domínio configurado no backend.");
   }
 
-   const [menuRes, cfgRes, horariosRes] = await Promise.all([
+   const [menuRes, cfgRes, horariosRes, adcRes] = await Promise.all([
     fetch(`${CONFIG.API_BASE}/api/v1/cardapio/${RESTAURANT_ID}`),
     fetch(`${CONFIG.API_BASE}/api/v1/restaurante/${RESTAURANT_ID}/config`),
-    fetch(`${CONFIG.API_BASE}/api/v1/restaurante/${RESTAURANT_ID}/horarios`)
+    fetch(`${CONFIG.API_BASE}/api/v1/restaurante/${RESTAURANT_ID}/horarios`),
+    fetch(`${CONFIG.API_BASE}/api/v1/cardapio/${RESTAURANT_ID}/adicionais`).catch(() => null)
   ]);
+  ADICIONAIS = adcRes?.ok ? await adcRes.json().catch(() => ({})) : {};
   if(!menuRes.ok){
     throw new Error(`Não foi possível carregar o cardápio agora (erro ${menuRes.status}). Tente novamente em instantes.`);
   }
