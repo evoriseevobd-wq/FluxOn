@@ -3693,3 +3693,16 @@ input.adc-obs:focus { border-bottom: 1px solid rgba(249,115,115,0.7) !important;
 .adc-obs::placeholder { color: rgba(252,228,228,0.32); }
 @media (max-width: 560px) { .adc-cab, .adc-adm-linha { grid-template-columns: minmax(0,1fr) 72px 44px 46px 28px; } }
 
+
+/* "Salvo ✓": pulsa e some; erro fica parado */
+.pulso-salvo { color: rgba(134,239,172,0.95) !important; font-weight: 700; animation: pulsoSalvo 1.6s ease forwards; }
+.aviso-erro { color: #f87171 !important; font-weight: 600; }
+@keyframes pulsoSalvo {
+  0%   { opacity: 0; transform: scale(0.96); }
+  15%  { opacity: 1; transform: scale(1.04); }
+  30%  { transform: scale(1); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .pulso-salvo { animation: pulsoSalvoCalmo 2s linear forwards; } }
+@keyframes pulsoSalvoCalmo { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
