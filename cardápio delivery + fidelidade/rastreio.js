@@ -90,10 +90,13 @@ const rastreio = (() => {
     R.lista = R.lista.filter((x) => !R.dados.has(x.c) || ativo(R.dados.get(x.c)) || Date.now() - x.t < UMA_HORA);
     salvar();
   }
-  // os pedidos que aparecem: em andamento primeiro, depois os entregues na última hora
+  // os pedidos que aparecem: só os em andamento (cancelado e entregue somem).
+  // Exceção: o que o cliente está olhando agora e acabou de ser entregue continua na tela até ele sair.
   function ativosEmOrdem() {
-    return R.lista.map((x) => x.c).filter((c) => ativo(R.dados.get(c)))
-      .sort((a, b) => (emAndamento(R.dados.get(b)) ? 1 : 0) - (emAndamento(R.dados.get(a)) ? 1 : 0));
+    return R.lista.map((x) => x.c).filter((c) => {
+      const d = R.dados.get(c);
+      return emAndamento(d) || (R.aberto && c === R.atual && d?.pedido.status === "finished");
+    });
   }
 
   /* ---------- textos de cada etapa ---------- */
@@ -191,6 +194,12 @@ const rastreio = (() => {
   window.addEventListener("popstate", () => { if (R.aberto) fechar(false); });
 
   function desenhar() {
+    // cancelado não aparece: vai pro outro pedido ativo, ou fecha se não tiver nenhum
+    if (!ativosEmOrdem().includes(R.atual)) {
+      const outro = ativosEmOrdem()[0];
+      if (!outro) return fechar(true);
+      R.atual = outro;
+    }
     const d = R.dados.get(R.atual);
     if (!d) return;
     const e = etapa(d), ativos = ativosEmOrdem();
