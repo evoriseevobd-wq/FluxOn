@@ -2103,6 +2103,9 @@ async function abrirCriarPedidoMesa(key) {
       const p = parseFloat(item.preco || 0);
       itensSelecionados.push({ name: item.nome, qty: 1, price: p, preco_base: p, quantidade: 1, adicionais: [], obs: "",
         item_id: item.item_id ?? item.id ?? null, opcao_id: item.opcao_id || null, ...(item.sabores ? { sabores: item.sabores } : {}) });
+          }
+    renderItens();
+  }
   // "+ Adicional" e observação de cada item
   modal.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-mesa-adc]");
@@ -6922,6 +6925,8 @@ async function openItemModal(item = null) {
           <button type="button" onclick="adicionarVariacao()" style="
             padding:7px 14px; border-radius:8px; border:1px dashed rgba(249,115,115,0.4);
             background:transparent; color:rgba(249,115,115,0.8); font-size:12px; cursor:pointer;
+          ">+ Adicionar variação</button>
+        </div>
         <label style="display:flex; align-items:center; gap:10px; color:rgba(252,228,228,0.8); font-size:13px; cursor:pointer;">
           <input type="checkbox" id="item-sem-adicionais" ${item?.sem_adicionais ? "checked" : ""} style="width:18px; height:18px; accent-color:#ef4444;">
           Sem adicionais neste item <span style="color:rgba(252,228,228,0.4); font-size:11.5px;">(ex.: combo kids, mesmo a categoria tendo adicionais)</span>
@@ -9648,7 +9653,9 @@ window.itensParaEnvio = function (lista) {
     item_id: i.item_id, opcao_id: i.opcao_id || null,
     ...(Array.isArray(i.sabores) && i.sabores.length ? { sabores: i.sabores } : {}),
     qtd: Math.max(1, Math.round(Number(i.qty ?? i.quantidade) || 1)),
-    preco: Number(i.price ?? i.preco) || 0
+    preco: Number(i.preco_base ?? i.price ?? i.preco) || 0,   // só vale pra item sem preço no cardápio (Diversos)
+    ...(Array.isArray(i.adicionais) && i.adicionais.length ? { adicionais: i.adicionais.map(a => ({ id: a.id, qtd: Number(a.qtd) || 1 })) } : {}),
+    ...(String(i.obs || "").trim() ? { obs: String(i.obs).trim().slice(0, 140) } : {})
   }));
 };
 
