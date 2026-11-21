@@ -1137,9 +1137,11 @@ function abrirDrawerMesa(key) {
       const nome = it.name || it.nome || "Item";
       const qty = it.qty || it.quantidade || 1;
       const price = parseFloat(it.price || it.preco || 0);
-      const existente = todosItens.find(i => i.nome === nome);
+      const adicionais = Array.isArray(it.adicionais) ? it.adicionais : [], obs = String(it.obs || "").trim();
+      const chave = nome + "|" + adicionais.map(adcTexto).join(",") + "|" + obs + "|" + price;   // só junta o que é igual de verdade
+      const existente = todosItens.find(i => i.chave === chave);
       if (existente) { existente.qty += qty; }
-      else { todosItens.push({ nome, qty, price }); }
+      else { todosItens.push({ nome, qty, price, adicionais, obs, chave }); }
     });
   });
 
@@ -1184,7 +1186,7 @@ function abrirDrawerMesa(key) {
               <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
                 <div style="display:flex; align-items:center; gap:12px;">
                   <span style="font-size:12px; font-weight:800; color:rgba(252,228,228,0.25); min-width:24px;">×${it.qty}</span>
-                  <span style="font-size:14px; font-weight:600; color:rgba(252,228,228,0.9);">${escapeHtml(it.nome)}</span>
+                  <span style="font-size:14px; font-weight:600; color:rgba(252,228,228,0.9);">${escapeHtml(it.nome)}${adcLinhasPedido(it)}</span>
                 </div>
                 ${it.price > 0 ? `<span style="font-size:14px; font-weight:700; color:rgba(251,191,36,0.9);">${formatCurrency(it.price * it.qty)}</span>` : ''}
               </div>
@@ -1652,6 +1654,8 @@ function editarPedidoMesa(key) {
     qty: it.qty || it.quantidade || 1,
     price: parseFloat(it.price || it.preco || 0),
     item_id: it.item_id ?? null, opcao_id: it.opcao_id || null, ...(Array.isArray(it.sabores) ? { sabores: it.sabores } : {}),
+    preco_base: parseFloat(it.preco_base ?? it.price ?? it.preco ?? 0), adicionais: Array.isArray(it.adicionais) ? it.adicionais : [], obs: it.obs || "",
+    _orig: true, _qtdOrig: it.qty || it.quantidade || 1,   // já estava no pedido (já foi pra cozinha)
   }));
 
   const modal = document.createElement("div");
@@ -1720,8 +1724,8 @@ function editarPedidoMesa(key) {
 
           <!-- OBSERVAÇÕES -->
           <div>
-            <label style="font-size:11px; color:rgba(252,228,228,0.4); text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:5px;">Observações</label>
-            <textarea id="ep-obs" rows="2" placeholder="Ex: sem cebola, bebida sem gelo..."
+            <label style="font-size:11px; color:rgba(252,228,228,0.4); text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:5px;">Observação do pedido</label>
+            <textarea id="ep-obs" rows="2" placeholder="Ex.: conta dividida em 2, cliente com pressa"
               style="width:100%; background:rgba(255,255,255,0.06); border:0.5px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px; color:rgba(252,228,228,0.95); font-size:13px; box-sizing:border-box; resize:vertical; outline:none; font-family:inherit;">${escapeHtml(pedido.notes || "")}</textarea>
           </div>
 
@@ -1751,8 +1755,12 @@ function editarPedidoMesa(key) {
         <div style="flex:1;">
           <p style="margin:0; font-size:13px; font-weight:600; color:rgba(252,228,228,0.95);">${escapeHtml(it.nome)}</p>
           <p style="margin:2px 0 0; font-size:12px; color:rgba(251,191,36,0.9);">R$ ${(it.price * it.qty).toFixed(2).replace(".", ",")}</p>
+          ${it._orig
+            ? `${(it.adicionais || []).map(a => `<div class="adc-item-linha" style="cursor:default;"><span>+ ${escapeHtml(adcTexto(a))}</span><span></span></div>`).join("")}${it.obs ? `<div class="adc-item-linha" style="cursor:default;"><span>» ${escapeHtml(it.obs)}</span><span></span></div>` : ""}`
+            : adcHtmlDoItem(it, i, "ep")}
         </div>
         <div style="display:flex; align-items:center; gap:6px;">
+          ${it._orig ? "" : adcBotao(it, i, "ep")}
                    ${it.qty === 1 ? `
           <button onclick="window._epRemover(${i})" style="width:24px; height:24px; border-radius:6px; background:rgba(180,40,40,0.3); border:0.5px solid rgba(180,40,40,0.4); color:rgba(224,112,96,1); cursor:pointer; line-height:1; font-family:inherit; display:flex; align-items:center; justify-content:center;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1770,6 +1778,23 @@ function editarPedidoMesa(key) {
     const totalEl = document.getElementById("ep-total");
     if (totalEl) totalEl.textContent = `R$ ${calcTotal().toFixed(2).replace(".", ",")}`;
   }
+  
+  // "+ Adicional" e observação dos itens novos
+  modal.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-ep-adc]");
+    if (!b) return;
+    const it = itens[+b.dataset.epAdc];
+    if (!it || it._orig) return;
+    const escolhidos = await escolherAdicionais(it.item_id, it.nome, it.adicionais);
+    if (!escolhidos) return;
+    it.adicionais = escolhidos;
+    it.price = Math.round((it.preco_base + adcSoma(escolhidos)) * 100) / 100;
+    renderItens();
+  });
+  modal.addEventListener("input", (e) => {
+    const i = e.target.dataset.epObs;
+    if (i !== undefined && itens[+i] && !itens[+i]._orig) itens[+i].obs = e.target.value;
+  });
 
   window._epQty = function(i, delta) {
     itens[i].qty += delta;
@@ -1820,10 +1845,11 @@ function editarPedidoMesa(key) {
       if (Array.isArray(item.opcoes) && item.opcoes.length && window._escolherVariacao) return window._escolherVariacao(item, juntar);
       juntar({ ...item, item_id: item.id, opcao_id: null });
     };
-    function juntar(item) {
-      const existente = itens.find(i => i.nome === item.nome);
+    async function juntar(item) {
+      await adcCatalogo();
+      const existente = itens.find(i => i.nome === item.nome && !i._orig && !(i.adicionais || []).length && !i.obs);
       if (existente) { existente.qty++; }
-      else { itens.push({ nome: item.nome, qty: 1, price: parseFloat(item.preco || 0),
+      else { const p = parseFloat(item.preco || 0); itens.push({ nome: item.nome, qty: 1, price: p, preco_base: p, adicionais: [], obs: "",
         item_id: item.item_id ?? item.id ?? null, opcao_id: item.opcao_id || null, ...(item.sabores ? { sabores: item.sabores } : {}) }); }
       renderItens();
     }
@@ -1842,16 +1868,12 @@ function setupSalvar() {
     const clienteTel = document.getElementById("ep-telefone")?.value.trim() || pedido.client_phone;
     const obs = document.getElementById("ep-obs")?.value.trim() || "";
 
-    // Calcula só os itens novos ou com qty aumentada
-    const itensOriginais = (pedido.itens || []);
-    const itensNovos = itens.filter(it => {
-      const orig = itensOriginais.find(o => (o.name || o.nome) === it.nome);
-      return !orig || it.qty > (orig.qty || orig.quantidade || 1);
-    }).map(it => {
-      const orig = itensOriginais.find(o => (o.name || o.nome) === it.nome);
-      const qtyNova = orig ? it.qty - (orig.qty || orig.quantidade || 1) : it.qty;
-      return { name: it.nome, nome: it.nome, qty: qtyNova, quantidade: qtyNova, price: it.price, preco: it.price,
-        item_id: it.item_id ?? null, opcao_id: it.opcao_id || null, ...(it.sabores ? { sabores: it.sabores } : {}) };
+    // Calcula só os itens novos ou com qty aumentada (o que já estava no pedido não muda)
+    const itensNovos = itens.filter(it => !it._orig || it.qty > it._qtdOrig).map(it => {
+      const qtyNova = it._orig ? it.qty - it._qtdOrig : it.qty;
+      return { name: it.nome, nome: it.nome, qty: qtyNova, quantidade: qtyNova, price: it.price, preco: it.price, preco_base: it.preco_base,
+        item_id: it.item_id ?? null, opcao_id: it.opcao_id || null, ...(it.sabores ? { sabores: it.sabores } : {}),
+        adicionais: it.adicionais || [], obs: it.obs || "" };
     });
 
     const totalNovo = itensNovos.reduce((s, it) => s + it.price * it.qty, 0);
@@ -2012,16 +2034,18 @@ async function abrirCriarPedidoMesa(key) {
     const lista = document.getElementById("add-itens-lista");
     if (!lista) return;
     lista.innerHTML = itensSelecionados.map((it, i) => `
-      <div style="display:flex; align-items:center; justify-content:space-between;
-        padding:10px 14px; background:#0d0d0d;
-border:1px solid rgba(255,255,255,0.08); border-radius:10px;">
+      <div style="display:grid; gap:4px; padding:10px 14px; background:#0d0d0d; border:1px solid rgba(255,255,255,0.08); border-radius:10px;">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
         <span style="font-size:14px; font-weight:700; color:rgba(252,228,228,0.95); flex:1;">${escapeHtml(it.name)}</span>
         <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+          ${adcBotao(it, i, "mesa")}
           <button onclick="window._addQty(${i}, -1)" style="background:none; border:none; color:rgba(252,228,228,0.5); font-size:18px; cursor:pointer; padding:0 4px;">−</button>
           <span style="font-size:14px; font-weight:800; min-width:20px; text-align:center;">${it.qty}</span>
           <button onclick="window._addQty(${i}, 1)" style="background:none; border:none; color:rgba(252,228,228,0.5); font-size:18px; cursor:pointer; padding:0 4px;">+</button>
           ${it.price > 0 ? `<span style="color:rgba(251,191,36,0.85); font-size:13px; font-weight:700; min-width:60px; text-align:right;">${formatCurrency(it.price * it.qty)}</span>` : ''}
         </div>
+         </div>
+      ${adcHtmlDoItem(it, i, "mesa")}
       </div>
     `).join('');
   }
@@ -2070,16 +2094,30 @@ border:1px solid rgba(255,255,255,0.08); border-radius:10px;">
     if (Array.isArray(item.opcoes) && item.opcoes.length && window._escolherVariacao) return window._escolherVariacao(item, juntar);
     juntar({ ...item, item_id: item.id, opcao_id: null });
   };
-  function juntar(item) {
-    const existente = itensSelecionados.find(i => i.name === item.nome);
+  async function juntar(item) {
+    await adcCatalogo();
+    const existente = itensSelecionados.find(i => i.name === item.nome && !(i.adicionais || []).length && !i.obs);
     if (existente) {
       existente.qty++;
     } else {
-      itensSelecionados.push({ name: item.nome, qty: 1, price: parseFloat(item.preco || 0), quantidade: 1,
+      const p = parseFloat(item.preco || 0);
+      itensSelecionados.push({ name: item.nome, qty: 1, price: p, preco_base: p, quantidade: 1, adicionais: [], obs: "",
         item_id: item.item_id ?? item.id ?? null, opcao_id: item.opcao_id || null, ...(item.sabores ? { sabores: item.sabores } : {}) });
-    }
+  // "+ Adicional" e observação de cada item
+  modal.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-mesa-adc]");
+    if (!b) return;
+    const it = itensSelecionados[+b.dataset.mesaAdc];
+    const escolhidos = it && await escolherAdicionais(it.item_id, it.name, it.adicionais);
+    if (!escolhidos) return;
+    it.adicionais = escolhidos;
+    it.price = Math.round((it.preco_base + adcSoma(escolhidos)) * 100) / 100;
     renderItens();
-  }
+  });
+  modal.addEventListener("input", (e) => {
+    const i = e.target.dataset.mesaObs;
+    if (i !== undefined && itensSelecionados[+i]) itensSelecionados[+i].obs = e.target.value;
+  });
   let chaveAdicionar = null; // mesmo envio repetido não soma os itens duas vezes
 
   // Confirmar
@@ -2916,7 +2954,7 @@ if (modalItems) {
       li.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
           <span style="font-size:12px; font-weight:800; color:rgba(252,228,228,0.3); min-width:24px;">×${qty}</span>
-          <span style="font-size:14px; font-weight:600; color:rgba(252,228,228,0.92); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(name)}</span>
+          <span style="font-size:14px; font-weight:600; color:rgba(252,228,228,0.92); min-width:0;"><span style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(name)}</span>${adcLinhasPedido(it)}</span>
         </div>
         ${price > 0 ? `<span style="font-size:14px; font-weight:700; color:rgba(251,191,36,0.9); white-space:nowrap;">${formatCurrency(price * qty)}</span>` : ""}
       `;
@@ -4929,7 +4967,7 @@ if (modalEditBtn) modalEditBtn.addEventListener("click", (e) => {
   const orderIdParaEditar = activeOrderId;
   closeOrderModal();
 
-  setTimeout(() => {
+  setTimeout(async () => {
     window._editandoPedido = true;
     openBackdrop(createModal);
 
@@ -4954,8 +4992,10 @@ if (modalEditBtn) modalEditBtn.addEventListener("click", (e) => {
       qty: it.qty || it.quantidade || 1,
       price: parseFloat(it.price || it.preco || 0),
       quantidade: it.qty || it.quantidade || 1,
-      item_id: it.item_id ?? null, opcao_id: it.opcao_id || null, ...(Array.isArray(it.sabores) ? { sabores: it.sabores } : {})
+      item_id: it.item_id ?? null, opcao_id: it.opcao_id || null, ...(Array.isArray(it.sabores) ? { sabores: it.sabores } : {}),
+      preco_base: parseFloat(it.preco_base ?? it.price ?? it.preco ?? 0), adicionais: Array.isArray(it.adicionais) ? it.adicionais : [], obs: it.obs || ""
     }));
+    await adcCatalogo();
     renderItensSelecionados();
 
     editingOrderId = orderIdParaEditar;
@@ -5022,70 +5062,55 @@ if (window._itensPedidoExterno) {
 
 function renderItensSelecionados() {
   itensSelecionados.innerHTML = itensPedido.map((it, i) => `
-    <div style="
-      display:flex; align-items:center; justify-content:space-between;
-      padding:10px 14px;
-      background:#0d0d0d;
-border:1px solid rgba(255, 255, 255, 0.08);
-      border-radius:10px;
-      width:100%;
-      gap:12px;
-    ">
-      <!-- ESQUERDA: Nome + preço -->
-      <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
-        <span style="color:rgba(252,228,228,0.95); font-weight:700; font-size:14px;
-          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-          ${escapeHtml(it.name)}
-        </span>
-        ${it.price > 0 ? `
-          <span style="color:rgba(251,191,36,0.85); font-size:12px; font-weight:700; white-space:nowrap;">
-            R$${(it.price * it.qty).toFixed(2)}
-          </span>
-        ` : ''}
+    <div class="np-item" style="display:grid; gap:4px; padding:10px 14px; background:#0d0d0d; border:1px solid rgba(255,255,255,0.08); border-radius:10px; width:100%; box-sizing:border-box;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <!-- ESQUERDA: Nome + preço -->
+        <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+          <span style="color:rgba(252,228,228,0.95); font-weight:700; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(it.name)}</span>
+          ${it.price > 0 ? `<span style="color:rgba(251,191,36,0.85); font-size:12px; font-weight:700; white-space:nowrap;">R$${(it.price * it.qty).toFixed(2)}</span>` : ''}
+        </div>
+        <!-- DIREITA: + Adicional, lixeira/−, qtd, + -->
+        <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+          ${adcBotao(it, i, "np")}
+          ${it.qty === 1 ? `
+          <button onclick="removerItemPedido(${i})" aria-label="Tirar item" style="background:none; border:none; color:rgba(224,112,96,1); cursor:pointer; padding:0 4px; line-height:1; display:flex; align-items:center; justify-content:center;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>` : `
+          <button onclick="alterarQtd(${i}, -1)" aria-label="Menos" style="background:none; border:none; color:rgba(252,228,228,0.5); font-size:18px; font-weight:900; cursor:pointer; padding:0 4px; line-height:1;">−</button>`}
+          <span style="min-width:18px; text-align:center; color:rgba(252,228,228,1); font-weight:800; font-size:14px; font-family:'Space Grotesk', sans-serif;">${it.qty}</span>
+          <button onclick="alterarQtd(${i}, 1)" aria-label="Mais" style="background:none; border:none; color:rgba(252,228,228,0.5); font-size:18px; font-weight:900; cursor:pointer; padding:0 4px; line-height:1;">+</button>
+        </div>
       </div>
-
-      <!-- DIREITA: − qty + -->
-      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-
-        ${it.qty === 1 ? `
-        <button onclick="removerItemPedido(${i})" style="
-          background:none; border:none;
-          color:rgba(224,112,96,1);
-          cursor:pointer; padding:0 4px; line-height:1;
-          display:flex; align-items:center; justify-content:center;
-        ">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-          </svg>
-        </button>
-        ` : `
-        <button onclick="alterarQtd(${i}, -1)" style="
-          background:none; border:none;
-          color:rgba(252,228,228,0.5);
-          font-size:18px; font-weight:900; cursor:pointer;
-          padding:0 4px; line-height:1;
-        ">−</button>
-        `}
-
-        <span style="
-          min-width:18px; text-align:center;
-          color:rgba(252,228,228,1);
-          font-weight:800; font-size:14px;
-          font-family:'Space Grotesk', sans-serif;
-        ">${it.qty}</span>
-
-        <button onclick="alterarQtd(${i}, 1)" style="
-          background:none; border:none;
-          color:rgba(252,228,228,0.5);
-          font-size:18px; font-weight:900; cursor:pointer;
-          padding:0 4px; line-height:1;
-        ">+</button>
-
-      </div>
+      ${adcHtmlDoItem(it, i, "np")}
     </div>
   `).join('');
   atualizarHiddenItems();
 }
+  // total do Novo pedido = soma dos itens (cada um já com os adicionais)
+function npRecalcTotal() {
+  const totalField = document.getElementById("new-total-price");
+  if (!totalField) return;
+  const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
+  totalField.value = soma > 0 ? soma.toFixed(2).replace('.', ',') : '';
+}
+// "+ Adicional" e observação de cada item (sem redesenhar enquanto digita)
+itensSelecionados?.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-np-adc]");
+  if (!b) return;
+  const it = itensPedido[+b.dataset.npAdc];
+  if (!it) return;
+  const escolhidos = await escolherAdicionais(it.item_id, it.name, it.adicionais);
+  if (!escolhidos) return;
+  it.adicionais = escolhidos;
+  it.price = Math.round(((it.preco_base ?? it.price) + adcSoma(escolhidos)) * 100) / 100;
+  renderItensSelecionados(); npRecalcTotal();
+});
+itensSelecionados?.addEventListener("input", (e) => {
+  const i = e.target.dataset.npObs;
+  if (i === undefined || !itensPedido[+i]) return;
+  itensPedido[+i].obs = e.target.value;
+  atualizarHiddenItems();
+});
 
  window.removerItemPedido = function(index) {
   itensPedido.splice(index, 1);
@@ -5181,12 +5206,13 @@ window.alterarQtd = function(index, delta) {
   if (preco === null) return;
 }
 
-    const existente = itensPedido.find(i => i.name === item.nome);
+    await adcCatalogo();
+    const existente = itensPedido.find(i => i.name === item.nome && !(i.adicionais || []).length && !i.obs);
     if (existente) {
       existente.qty++;
     } else {
-      itensPedido.push({ name: item.nome, qty: 1, price: preco, quantidade: 1,
-     item_id: item.item_id ?? item.id ?? null, opcao_id: item.opcao_id || null, ...(item.sabores ? { sabores: item.sabores } : {}) });
+      itensPedido.push({ name: item.nome, qty: 1, price: preco, preco_base: preco, quantidade: 1,
+     item_id: item.item_id ?? item.id ?? null, opcao_id: item.opcao_id || null, ...(item.sabores ? { sabores: item.sabores } : {}), adicionais: [], obs: "" });
     }
     renderItensSelecionados();
     searchInput.value = '';
@@ -6896,8 +6922,10 @@ async function openItemModal(item = null) {
           <button type="button" onclick="adicionarVariacao()" style="
             padding:7px 14px; border-radius:8px; border:1px dashed rgba(249,115,115,0.4);
             background:transparent; color:rgba(249,115,115,0.8); font-size:12px; cursor:pointer;
-          ">+ Adicionar variação</button>
-        </div>
+        <label style="display:flex; align-items:center; gap:10px; color:rgba(252,228,228,0.8); font-size:13px; cursor:pointer;">
+          <input type="checkbox" id="item-sem-adicionais" ${item?.sem_adicionais ? "checked" : ""} style="width:18px; height:18px; accent-color:#ef4444;">
+          Sem adicionais neste item <span style="color:rgba(252,228,228,0.4); font-size:11.5px;">(ex.: combo kids, mesmo a categoria tendo adicionais)</span>
+        </label>
       </div>
       <div class="modal-actions">
         <button class="ghost-button" id="item-cancel">Cancelar</button>
@@ -7343,43 +7371,78 @@ async function salvarItem(id = null) {
   if (!nome) { alert("Nome é obrigatório."); return; }
 console.log('💾 Salvando item:', { nome, preco, categoria, opcoes });
   
+  const sem_adicionais = !!document.getElementById("item-sem-adicionais")?.checked;
+  let salvo = null;
   try {
-    if (id) {
-      await fetch(`${API_BASE}/api/v1/cardapio/${id}`, {
+    const r = id
+      ? await fetch(`${API_BASE}/api/v1/cardapio/${id}`, {
         method: "PATCH", headers: buildHeaders(),
-        body: JSON.stringify({ nome, descricao, preco, categoria, foto_url, opcoes: opcoes.length > 0 ? opcoes : null })
-      });
-    } else {
-      await fetch(`${API_BASE}/api/v1/cardapio`, {
+        body: JSON.stringify({ nome, descricao, preco, categoria, foto_url, opcoes: opcoes.length > 0 ? opcoes : null, sem_adicionais })
+      })
+      : await fetch(`${API_BASE}/api/v1/cardapio`, {
         method: "POST", headers: buildHeaders(),
-        body: JSON.stringify({ restaurant_id: rid, nome, descricao, preco, categoria, foto_url, opcoes: opcoes.length > 0 ? opcoes : null })
+        body: JSON.stringify({ restaurant_id: rid, nome, descricao, preco, categoria, foto_url, opcoes: opcoes.length > 0 ? opcoes : null, sem_adicionais })
       });
-    }
+    salvo = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(salvo?.error || "Erro ao salvar item.");
     document.getElementById("item-modal")?.remove();
-    await fetchCardapio();
+    // salvou: só aquele item muda na lista (sem recarregar a tela)
+    if (salvo && salvo.id != null) {
+      const k = cardapioItems.findIndex(i => String(i.id) === String(salvo.id));
+      if (k >= 0) cardapioItems[k] = { ...cardapioItems[k], ...salvo }; else cardapioItems.push(salvo);
+      cardapioCatAtiva = salvo.categoria || cardapioCatAtiva;
+      _adcCat.em = 0;
+      renderCardapio(true);
+    } else await fetchCardapio();
   } catch (e) {
-    alert("Erro ao salvar item.");
+    alert(e.message || "Erro ao salvar item.");
   }
 }
 
 async function toggleAtivo(id, ativoAtual) {
-  await fetch(`${API_BASE}/api/v1/cardapio/${id}`, {
+  const it = cardapioItems.find(i => String(i.id) === String(id));
+  if (it) { it.ativo = !ativoAtual; renderCardapio(true); }        // muda na hora; se o servidor recusar, volta
+  const r = await fetch(`${API_BASE}/api/v1/cardapio/${id}`, {
     method: "PATCH", headers: buildHeaders(),
     body: JSON.stringify({ ativo: !ativoAtual })
-  });
-  await fetchCardapio();
+  }).catch(() => null);
+  if (!r?.ok) { if (it) it.ativo = ativoAtual; renderCardapio(true); alert("Não deu pra mudar o item. Confira a internet."); }
 }
 
 async function deletarItem(id) {
   showConfirmModal("Tem certeza que deseja excluir este item?", async () => {
-    await fetch(`${API_BASE}/api/v1/cardapio/${id}`, { method: "DELETE", headers: buildHeaders() });
-    await fetchCardapio();
+    const r = await fetch(`${API_BASE}/api/v1/cardapio/${id}`, { method: "DELETE", headers: buildHeaders() }).catch(() => null);
+    if (!r?.ok) return alert("Não deu pra excluir o item. Tente de novo.");
+    cardapioItems = cardapioItems.filter(i => String(i.id) !== String(id));
+    renderCardapio(true);
   });
+}
+
+// lista do popup de categorias (redesenhada no lugar depois de criar, renomear, excluir ou trocar a foto)
+function htmlListaCategorias(categoriasDb) {
+  return `${categoriasDb.length === 0
+            ? `<p style="color:rgba(252,228,228,0.4); text-align:center; padding:20px 0; font-size:13px;">Nenhuma categoria ainda.</p>`
+            : categoriasDb.map(cat => `
+             <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(28,28,30,0.45); border:1px solid rgba(255,255,255,0.18); border-radius:10px; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px; flex:1;">
+                <label style="position:relative; width:40px; height:40px; border-radius:50%; cursor:pointer; flex-shrink:0; display:block;">
+                    ${cat.foto_url
+                      ? `<img src="${cat.foto_url}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; display:block;" />`
+                      : `<div style="width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.09); display:flex; align-items:center; justify-content:center; font-size:18px;">📷</div>`}
+                    <input type="file" accept="image/*" style="position:absolute; inset:0; opacity:0; cursor:pointer; border-radius:50%;" onchange="uploadFotoCategoria('${cat.id}', this)" />
+                  </label>
+                  <span style="color:rgba(252,228,228,0.9); font-weight:700; font-size:14px;">${escapeHtml(cat.nome)}</span>
+                </div>
+                <div style="display:flex; gap:8px; flex-shrink:0;">
+                  <button onclick="renomearCategoria('${cat.id}', '${escapeHtml(cat.nome)}')" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.18); background:transparent; color:rgba(252,228,228,0.7); cursor:pointer; font-size:11px;">Renomear</button>
+                  <button onclick="deletarCategoria('${cat.id}', '${escapeHtml(cat.nome)}')" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(239,68,68,0.5); background:transparent; color:rgba(239,68,68,0.8); cursor:pointer; font-size:11px;">Excluir</button>
+                </div>
+              </div>
+            `).join('')}`;
 }
 
 async function openCategoriasModal() {
   const existing = document.getElementById("categorias-modal");
-  if (existing) existing.remove();
 
   const rid = getRestaurantId();
   let categoriasDb = [];
@@ -7389,6 +7452,10 @@ async function openCategoriasModal() {
   } catch (e) {
     categoriasDb = [];
   }
+    // já aberto: só a lista muda (não fecha e abre de novo)
+  const listaAberta = existing?.querySelector("#lista-categorias-modal");
+  if (listaAberta) { listaAberta.innerHTML = htmlListaCategorias(categoriasDb); return; }
+  existing?.remove();
 
   const modal = document.createElement("div");
   modal.id = "categorias-modal";
@@ -7409,27 +7476,7 @@ async function openCategoriasModal() {
           <button class="primary-button" onclick="criarCategoria()" style="white-space:nowrap;">+ Criar</button>
         </div>
 
-        <div id="lista-categorias-modal" style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
-          ${categoriasDb.length === 0
-            ? `<p style="color:rgba(252,228,228,0.4); text-align:center; padding:20px 0; font-size:13px;">Nenhuma categoria ainda.</p>`
-            : categoriasDb.map(cat => `
-             <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; background:rgba(28,28,30,0.45); border:1px solid rgba(255,255,255,0.18); border-radius:10px; gap:12px;">
-                <div style="display:flex; align-items:center; gap:10px; flex:1;">
-                <label style="position:relative; width:40px; height:40px; border-radius:50%; cursor:pointer; flex-shrink:0; display:block;">
-                    ${cat.foto_url
-                      ? `<img src="${cat.foto_url}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; display:block;" />`
-                      : `<div style="width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.09); display:flex; align-items:center; justify-content:center; font-size:18px;">📷</div>`}
-                    <input type="file" accept="image/*" style="position:absolute; inset:0; opacity:0; cursor:pointer; border-radius:50%;" onchange="uploadFotoCategoria('${cat.id}', this)" />
-                  </label>
-                  <span style="color:rgba(252,228,228,0.9); font-weight:700; font-size:14px;">${escapeHtml(cat.nome)}</span>
-                </div>
-                <div style="display:flex; gap:8px; flex-shrink:0;">
-                  <button onclick="renomearCategoria('${cat.id}', '${escapeHtml(cat.nome)}')" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.18); background:transparent; color:rgba(252,228,228,0.7); cursor:pointer; font-size:11px;">Renomear</button>
-                  <button onclick="deletarCategoria('${cat.id}', '${escapeHtml(cat.nome)}')" style="padding:6px 10px; border-radius:8px; border:1px solid rgba(239,68,68,0.5); background:transparent; color:rgba(239,68,68,0.8); cursor:pointer; font-size:11px;">Excluir</button>
-                </div>
-              </div>
-            `).join('')}
-        </div>
+       <div id="lista-categorias-modal" style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">${htmlListaCategorias(categoriasDb)}</div>
 
       </div>
       <div class="modal-actions">
@@ -9687,3 +9734,238 @@ window.enviarComAutorizacao = async function (fazer, op = {}) {
 };
 
 
+/* ========================================
+   ➕ ADICIONAIS
+   Cada categoria tem as suas listas (ex.: Lanches → "Adicionais", "Molhos"), com o preço de cada um,
+   quantos de cada um (máx.) e quantos no total da lista (ex.: Bordas: até 1). Pausar some na hora pro cliente.
+   O pedido manda só { id, qtd }: o servidor cobra pelo cardápio e grava o preço da hora da venda.
+======================================== */
+const ADC_CAMPO = "padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.16); background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:13.5px; outline:none; font-family:inherit; min-width:0; box-sizing:border-box;";
+const adcPreco = (v) => { const n = parseFloat(String(v ?? "").replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0; };
+const adcChave = (c) => String(c || "").trim().toLowerCase();
+
+// o que o caixa pode oferecer: listas por categoria + o cardápio (pra saber a categoria e o "sem adicionais" de cada item)
+const _adcCat = { em: 0, mapa: {}, itens: [] };
+async function adcCatalogo(forcar = false) {
+  if (!forcar && Date.now() - _adcCat.em < 60000) return _adcCat;
+  const rid = getRestaurantId();
+  try {
+    const [mapa, itens] = await Promise.all([
+      fetch(`${API_BASE}/api/v1/cardapio/${rid}/adicionais`).then(r => r.ok ? r.json() : {}),
+      fetch(`${API_BASE}/api/v1/cardapio/${rid}?admin=true`).then(r => r.ok ? r.json() : [])
+    ]);
+    Object.assign(_adcCat, { em: Date.now(), mapa: mapa || {}, itens: Array.isArray(itens) ? itens : [] });
+  } catch {}
+  return _adcCat;
+}
+// listas que valem pra um item (pela categoria; item marcado "sem adicionais" não tem)
+function adcListasDoItem(itemId) {
+  const it = _adcCat.itens.find(i => String(i.id) === String(itemId));
+  if (!it || it.sem_adicionais) return [];
+  return _adcCat.mapa[adcChave(it.categoria)] || [];
+}
+window.adcTemAdicionais = (itemId) => adcListasDoItem(itemId).length > 0;
+window.adcSoma = (adicionais) => (adicionais || []).reduce((t, a) => t + (Number(a.preco) || 0) * (Number(a.qtd) || 1), 0);
+window.adcTexto = (a) => `${a.qtd > 1 ? a.qtd + "x " : ""}${a.nome}`;
+
+/* ---------- caixa escolhe os adicionais de um item (Novo pedido, mesa) ---------- */
+// devolve [{ id, nome, preco, qtd }] ou null (voltou sem mudar)
+window.escolherAdicionais = (itemId, nomeItem, atuais = []) => new Promise((ok) => {
+  const listas = adcListasDoItem(itemId);
+  if (!listas.length) return ok(null);
+  const qtd = new Map((atuais || []).map(a => [a.id, Number(a.qtd) || 1]));
+  document.getElementById("adc-escolha")?.remove();
+  const m = document.createElement("div");
+  m.id = "adc-escolha"; m.className = "modal-backdrop open";
+  const somaLista = (l) => l.itens.reduce((t, a) => t + (qtd.get(a.id) || 0), 0);
+  const desenhar = () => {
+    const extra = listas.flatMap(l => l.itens).reduce((t, a) => t + a.preco * (qtd.get(a.id) || 0), 0);
+    m.innerHTML = `
+      <div class="modal confirm-modal adc-modal" style="max-width:440px;">
+        <div class="modal-header"><h3>Adicionais · ${escapeHtml(nomeItem || "")}</h3></div>
+        <div class="modal-body" style="display:grid; gap:16px; max-height:60vh; overflow:auto;">
+          ${listas.map(l => `
+            <div class="adc-grupo">
+              <div class="adc-grupo-topo"><b>${escapeHtml(l.nome)}</b>${l.max ? `<small>até ${l.max}</small>` : ""}</div>
+              ${l.itens.map(a => {
+                const q = qtd.get(a.id) || 0, cheioLista = l.max && somaLista(l) >= l.max;
+                return `
+                <div class="adc-linha${q ? " on" : ""}">
+                  <span class="adc-nome">${escapeHtml(a.nome)}</span>
+                  <span class="adc-valor">${a.preco > 0 ? "+ " + formatCurrency(a.preco) : "grátis"}</span>
+                  <span class="adc-qtd">
+                    <button type="button" data-adc-menos="${escapeHtml(a.id)}" ${q ? "" : "disabled"} aria-label="Menos ${escapeHtml(a.nome)}">−</button>
+                    <b>${q}</b>
+                    <button type="button" data-adc-mais="${escapeHtml(a.id)}" ${q >= (a.max || 10) || cheioLista ? "disabled" : ""} aria-label="Mais ${escapeHtml(a.nome)}">+</button>
+                  </span>
+                </div>`;
+              }).join("")}
+            </div>`).join("")}
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost-button" data-adc-voltar>Voltar</button>
+          <button type="button" class="primary-button" data-adc-ok>${extra > 0 ? `Confirmar · + ${formatCurrency(extra)}` : "Confirmar"}</button>
+        </div>
+      </div>`;
+  };
+  desenhar();
+  document.body.appendChild(m);
+  const fim = (v) => { m.remove(); ok(v); };
+  m.addEventListener("click", (e) => {
+    const mais = e.target.closest("[data-adc-mais]"), menos = e.target.closest("[data-adc-menos]");
+    if (mais || menos) {
+      const id = (mais || menos).dataset.adcMais || (mais || menos).dataset.adcMenos;
+      qtd.set(id, Math.max(0, (qtd.get(id) || 0) + (mais ? 1 : -1)));
+      return desenhar();
+    }
+    if (e.target.closest("[data-adc-ok]")) {
+      const todos = listas.flatMap(l => l.itens);
+      return fim(todos.filter(a => qtd.get(a.id) > 0).map(a => ({ id: a.id, nome: a.nome, preco: a.preco, qtd: qtd.get(a.id) })));
+    }
+    if (e.target === m || e.target.closest("[data-adc-voltar]")) fim(null);
+  });
+});
+
+// card do item (Novo pedido, mesa): botão "+ Adicional", os escolhidos embaixo e a linha da observação
+window.adcHtmlDoItem = (it, i, prefixo, podeAdicional = true) => {
+  const lista = (it.adicionais || []).map(a => `
+    <div class="adc-item-linha" data-${prefixo}-adc="${i}"><span>+ ${escapeHtml(adcTexto(a))}</span><span>${a.preco > 0 ? formatCurrency(a.preco * a.qtd) : ""}</span></div>`).join("");
+  return `${lista}
+    <input class="adc-obs" data-${prefixo}-obs="${i}" maxlength="140" value="${escapeHtml(it.obs || "")}" placeholder="Alguma observação para este item?" aria-label="Observação do item">`;
+};
+window.adcBotao = (it, i, prefixo) => it.item_id != null && adcTemAdicionais(it.item_id)
+  ? `<button type="button" class="adc-botao" data-${prefixo}-adc="${i}">+ Adicional</button>` : "";
+
+/* ---------- dono cadastra as listas da categoria (Cardápio → Adicionais) ---------- */
+let _adcEdit = null; // { cat, catId, listas, outras }
+async function abrirAdicionaisCategoria(catNome) {
+  const cat = catNome || cardapioCatAtiva;
+  if (!cat) return alert("Crie uma categoria primeiro.");
+  const rid = getRestaurantId();
+  let cats = [];
+  try { cats = await fetch(`${API_BASE}/api/v1/cardapio/${rid}/categorias`).then(r => r.json()); } catch {}
+  const row = (cats || []).find(c => c.nome === cat);
+  const copia = (x) => JSON.parse(JSON.stringify(x || []));
+  _adcEdit = { cat, catId: row?.id || null, listas: copia(row?.adicionais), outras: (cats || []).filter(c => c.nome !== cat && Array.isArray(c.adicionais) && c.adicionais.length), salvando: false };
+  document.getElementById("adc-admin")?.remove();
+  const m = document.createElement("div");
+  m.id = "adc-admin"; m.className = "modal-backdrop open";
+  m.innerHTML = `<div class="modal confirm-modal adc-modal" style="width:620px; max-width:95vw;">
+      <div class="modal-header"><h3>Adicionais · ${escapeHtml(cat)}</h3><button class="icon-button" data-adm-fechar aria-label="Fechar">×</button></div>
+      <div class="modal-body" id="adc-admin-corpo" style="display:grid; gap:14px; max-height:68vh; overflow:auto;"></div>
+      <div class="modal-actions"><span id="adc-admin-aviso" class="adc-aviso"></span><button class="ghost-button" data-adm-fechar>Fechar</button><button class="primary-button" data-adm-salvar>Salvar</button></div>
+    </div>`;
+  document.body.appendChild(m);
+  adcAdminDesenhar();
+  m.addEventListener("click", adcAdminClique);
+  m.addEventListener("input", adcAdminDigitou);
+}
+function adcAdminDesenhar(foco) {
+  const corpo = document.getElementById("adc-admin-corpo");
+  if (!corpo || !_adcEdit) return;
+  const { listas, outras } = _adcEdit;
+  corpo.innerHTML = `
+    <p class="adc-ajuda">Aparecem para o cliente em todos os itens de <b>${escapeHtml(_adcEdit.cat)}</b> (menos os marcados "Sem adicionais neste item").</p>
+    ${listas.map((l, li) => `
+      <section class="adc-lista">
+        <div class="adc-lista-topo">
+          <input data-adm="lnome" data-l="${li}" value="${escapeHtml(l.nome || "")}" maxlength="40" placeholder="Nome da lista (ex.: Adicionais, Molhos, Bordas)" style="${ADC_CAMPO} flex:1;">
+          <label class="adc-max">Máx. no total <input data-adm="lmax" data-l="${li}" value="${l.max || ""}" inputmode="numeric" maxlength="2" placeholder="—" style="${ADC_CAMPO} width:56px; text-align:center;"></label>
+          <button type="button" class="cd-mini cd-perigo" data-adm-tira-lista="${li}">Excluir lista</button>
+        </div>
+        <div class="adc-cab"><span>Adicional</span><span>Preço</span><span>Máx.</span><span>Ativo</span><span></span></div>
+        ${(l.itens || []).map((a, ai) => `
+          <div class="adc-adm-linha${a.ativo === false ? " off" : ""}">
+            <input data-adm="anome" data-l="${li}" data-a="${ai}" value="${escapeHtml(a.nome || "")}" maxlength="50" placeholder="Ex.: Bacon 50g" style="${ADC_CAMPO}">
+            <input data-adm="apreco" data-l="${li}" data-a="${ai}" value="${a.preco != null && a.preco !== "" ? String(a.preco).replace(".", ",") : ""}" inputmode="decimal" placeholder="0,00" style="${ADC_CAMPO} text-align:right;">
+            <input data-adm="amax" data-l="${li}" data-a="${ai}" value="${a.max || 10}" inputmode="numeric" maxlength="2" style="${ADC_CAMPO} text-align:center;">
+            <button type="button" class="cd-sw${a.ativo === false ? "" : " on"}" data-adm-pausa="${li}:${ai}" role="switch" aria-checked="${a.ativo === false ? "false" : "true"}" title="${a.ativo === false ? "Ativar" : "Pausar (acabou)"}"></button>
+            <button type="button" class="adc-x" data-adm-tira="${li}:${ai}" aria-label="Tirar">×</button>
+          </div>`).join("")}
+        <button type="button" class="adc-mais-item" data-adm-novo="${li}">+ Adicional</button>
+      </section>`).join("")}
+    <div class="adc-rodape">
+      <button type="button" class="ghost-button" data-adm-nova-lista>+ Nova lista</button>
+      ${outras.length ? `<select id="adc-copiar" style="${ADC_CAMPO}"><option value="">Copiar lista de outra categoria…</option>
+        ${outras.map(c => c.adicionais.map((l, i) => `<option value="${escapeHtml(c.id)}:${i}">${escapeHtml(c.nome)} → ${escapeHtml(l.nome)}</option>`).join("")).join("")}</select>` : ""}
+    </div>`;
+  if (foco) corpo.querySelector(foco)?.focus();
+}
+function adcAdminDigitou(e) {
+  const t = e.target, d = t.dataset, L = _adcEdit?.listas;
+  if (!d.adm || !L) return;
+  const l = L[+d.l];
+  if (d.adm === "lnome") l.nome = t.value;
+  if (d.adm === "lmax") { t.value = t.value.replace(/\D/g, ""); l.max = t.value ? Number(t.value) : null; }
+  if (d.adm === "anome") l.itens[+d.a].nome = t.value;
+  if (d.adm === "apreco") l.itens[+d.a].preco = t.value;
+  if (d.adm === "amax") { t.value = t.value.replace(/\D/g, ""); l.itens[+d.a].max = Number(t.value) || 10; }
+}
+async function adcAdminClique(e) {
+  const m = document.getElementById("adc-admin"), t = e.target, E = _adcEdit;
+  if (!E) return;
+  if (t === m || t.closest("[data-adm-fechar]")) { m.remove(); _adcEdit = null; return; }
+  if (t.closest("[data-adm-nova-lista]")) { E.listas.push({ nome: "", max: null, itens: [{ nome: "", preco: "", max: 10, ativo: true }] }); return adcAdminDesenhar(`[data-adm="lnome"][data-l="${E.listas.length - 1}"]`); }
+  const novo = t.closest("[data-adm-novo]");
+  if (novo) { const li = +novo.dataset.admNovo; E.listas[li].itens.push({ nome: "", preco: "", max: 10, ativo: true }); return adcAdminDesenhar(`[data-adm="anome"][data-l="${li}"][data-a="${E.listas[li].itens.length - 1}"]`); }
+  const tira = t.closest("[data-adm-tira]");
+  if (tira) { const [li, ai] = tira.dataset.admTira.split(":").map(Number); E.listas[li].itens.splice(ai, 1); return adcAdminDesenhar(); }
+  const tiraL = t.closest("[data-adm-tira-lista]");
+  if (tiraL) { const li = +tiraL.dataset.admTiraLista; if (!confirm(`Excluir a lista "${E.listas[li].nome || "sem nome"}"?`)) return; E.listas.splice(li, 1); return adcAdminDesenhar(); }
+  const pausa = t.closest("[data-adm-pausa]");
+  if (pausa) { // pausar salva na hora (o bacon acabou: tem que sumir do app já)
+    const [li, ai] = pausa.dataset.admPausa.split(":").map(Number);
+    const a = E.listas[li].itens[ai]; a.ativo = a.ativo === false;
+    adcAdminDesenhar();
+    if (a.id) return adcAdminSalvar(false);
+    return;
+  }
+  if (t.closest("[data-adm-salvar]")) return adcAdminSalvar(true);
+}
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "adc-copiar" || !_adcEdit || !e.target.value) return;
+  const [catId, i] = e.target.value.split(":");
+  const l = _adcEdit.outras.find(c => String(c.id) === catId)?.adicionais?.[+i];
+  if (l) _adcEdit.listas.push({ nome: l.nome, max: l.max || null, itens: (l.itens || []).map(a => ({ nome: a.nome, preco: a.preco, max: a.max || 10, ativo: a.ativo !== false })) }); // cópia independente (ids novos)
+  adcAdminDesenhar();
+});
+async function adcAdminSalvar(fechar) {
+  const E = _adcEdit;
+  if (!E || E.salvando) return;
+  const aviso = document.getElementById("adc-admin-aviso");
+  // lista sem nome ou adicional sem nome: avisa em vez de sumir com o que a pessoa digitou
+  for (const l of E.listas) {
+    if (!String(l.nome || "").trim()) { aviso.textContent = "Dê um nome para cada lista."; return; }
+    l.itens = l.itens.filter(a => String(a.nome || "").trim() || String(a.preco || "").trim());
+    if (l.itens.some(a => !String(a.nome || "").trim())) { aviso.textContent = "Tem adicional sem nome."; return; }
+  }
+  E.salvando = true; aviso.textContent = "Salvando...";
+  const rid = getRestaurantId();
+  try {
+    if (!E.catId) { // categoria que só existia nos itens: cria a linha dela
+      const r = await fetch(`${API_BASE}/api/v1/cardapio/${rid}/categorias`, { method: "POST", headers: buildHeaders(), body: JSON.stringify({ nome: E.cat }) });
+      const c = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(c.error || "Não deu pra salvar a categoria");
+      E.catId = c.id;
+    }
+    const corpo = E.listas.map(l => ({ id: l.id, nome: l.nome, max: l.max || null, itens: l.itens.map(a => ({ id: a.id, nome: a.nome, preco: adcPreco(a.preco), max: Number(a.max) || 10, ativo: a.ativo !== false })) }));
+    const r = await fetch(`${API_BASE}/api/v1/categorias/${E.catId}`, { method: "PATCH", headers: buildHeaders(), body: JSON.stringify({ adicionais: corpo }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "Não deu pra salvar");
+    E.listas = JSON.parse(JSON.stringify(d.adicionais || []));
+    const c = cardapioCatsDb.find(x => x.nome === E.cat);
+    if (c) c.adicionais = d.adicionais; else cardapioCatsDb.push(d);
+    _adcCat.em = 0; // o caixa já vê a mudança no próximo pedido
+    aviso.textContent = "Salvo ✓";
+    if (fechar) { document.getElementById("adc-admin")?.remove(); _adcEdit = null; renderCardapio(true); }
+    else adcAdminDesenhar();
+  } catch (err) { aviso.textContent = err.message; }
+  finally { if (_adcEdit) _adcEdit.salvando = false; }
+}
+
+// no pedido aberto e na mesa: adicionais e observação embaixo do nome do item
+window.adcLinhasPedido = (it) => {
+  const a = (Array.isArray(it?.adicionais) ? it.adicionais : []).map(x => `<small style="display:block; font-size:12px; font-weight:500; color:rgba(252,228,228,0.6);">+ ${escapeHtml(adcTexto(x))}</small>`).join("");
+  const o = String(it?.obs || "").trim() ? `<small style="display:block; font-size:12px; font-weight:800; color:#fbbf24;">» ${escapeHtml(it.obs)}</small>` : "";
+  return a + o;
+};
