@@ -3656,4 +3656,40 @@ input[type="number"] {
 @media (max-width: 520px) { #caixa-modal .cxt { padding: 28px 22px; } .cxt-heroi b { font-size: 42px; } }
 
 
+/* ===== ➕ Adicionais ===== */
+.adc-modal .modal-body { padding-right: 4px; }
+.adc-ajuda { margin: 0; font-size: 12.5px; color: rgba(252,228,228,0.55); }
+.adc-lista { display: grid; gap: 8px; padding: 14px; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; background: rgba(255,255,255,0.02); }
+.adc-lista-topo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.adc-max { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: rgba(252,228,228,0.55); white-space: nowrap; }
+.adc-cab, .adc-adm-linha { display: grid; grid-template-columns: minmax(0,1fr) 92px 56px 46px 28px; gap: 8px; align-items: center; }
+.adc-cab { font-size: 11px; font-weight: 700; color: rgba(252,228,228,0.4); padding: 4px 2px 0; }
+.adc-adm-linha.off input { opacity: 0.45; }
+.adc-x { width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: rgba(252,228,228,0.5); font-size: 18px; cursor: pointer; }
+.adc-x:hover { color: #f87171; }
+.adc-mais-item { justify-self: start; padding: 6px 12px; border-radius: 8px; border: 1px dashed rgba(249,115,115,0.4); background: transparent; color: rgba(249,115,115,0.85); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.adc-rodape { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.adc-rodape select { flex: 1; min-width: 200px; }
+.adc-aviso { flex: 1; font-size: 12.5px; color: rgba(252,228,228,0.6); align-self: center; }
+.adc-grupo { display: grid; gap: 6px; }
+.adc-grupo-topo { display: flex; justify-content: space-between; align-items: baseline; }
+.adc-grupo-topo b { font-size: 14px; color: #fff; }
+.adc-grupo-topo small { font-size: 11.5px; color: rgba(252,228,228,0.5); }
+.adc-linha { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 9px 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+.adc-linha.on { border-color: rgba(249,115,115,0.45); background: rgba(249,115,115,0.06); }
+.adc-nome { font-size: 13.5px; font-weight: 600; color: rgba(252,228,228,0.95); }
+.adc-valor { font-size: 12.5px; color: rgba(251,191,36,0.9); white-space: nowrap; }
+.adc-qtd { display: flex; align-items: center; gap: 8px; }
+.adc-qtd b { min-width: 16px; text-align: center; font-size: 14px; }
+.adc-qtd button { width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: #fff; font-size: 16px; cursor: pointer; line-height: 1; }
+.adc-qtd button:disabled { opacity: 0.25; cursor: default; }
+.adc-botao { padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: rgba(252,228,228,0.75); font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.adc-botao:hover { border-color: rgba(249,115,115,0.6); color: #fff; }
+.adc-item-linha { display: flex; justify-content: space-between; gap: 10px; padding-left: 12px; font-size: 12.5px; color: rgba(252,228,228,0.7); cursor: pointer; }
+.adc-item-linha span:last-child { color: rgba(251,191,36,0.85); }
+/* linha fina e tracejada: só ganha cor quando o caixa clica pra escrever (vence o estilo dos inputs do modal) */
+input.adc-obs { width: 100% !important; box-sizing: border-box; margin: 2px 0 0 !important; padding: 5px 12px !important; border: 0 !important; border-bottom: 1px dashed rgba(255,255,255,0.14) !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; color: rgba(252,228,228,0.9) !important; font-size: 12.5px !important; font-family: inherit; outline: none; min-height: 0 !important; height: auto !important; }
+input.adc-obs:focus { border-bottom: 1px solid rgba(249,115,115,0.7) !important; }
+.adc-obs::placeholder { color: rgba(252,228,228,0.32); }
+@media (max-width: 560px) { .adc-cab, .adc-adm-linha { grid-template-columns: minmax(0,1fr) 72px 44px 46px 28px; } }
 
