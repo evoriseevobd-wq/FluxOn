@@ -1032,8 +1032,15 @@ app.get("/orders/:restaurant_id", requireOwner, async (req, res) => {
 // ✅ NOVA ROTA — Busca pedido aberto de uma mesa
 app.get("/api/v1/pedidos-mesa", async (req, res) => {
   try {
-    const { restaurant_id, mesa } = req.query;
-    if (!restaurant_id || !mesa) return sendError(res, 400, "restaurant_id e mesa são obrigatórios");
+    const { restaurant_id } = req.query;
+    let { mesa } = req.query;
+    if (!restaurant_id) return sendError(res, 400, "restaurant_id é obrigatório");
+    if (!readAuth(req)) { // cardápio da mesa (sem login): a mesa vem da sessão que o QR abriu
+      const sessao = await sessaoMesaValida(req.query.sessao, restaurant_id);
+      if (!sessao) return res.json({ pedido: null, expirada: true });
+      mesa = sessao.mesa;
+    }
+    if (!mesa) return sendError(res, 400, "mesa é obrigatória");
 
     const { data, error } = await supabase
       .from("orders")
@@ -2568,8 +2575,14 @@ app.patch("/api/v1/pedidos/:id/adicionar-itens", requireRowOwner("orders"), asyn
 
     // 🔁 mesmo envio repetido: não soma os itens de novo
     const chaveEnvio = chaveEnvioValida(req.body?.chave_envio);
-    const jaAplicada = (p) => chaveEnvio && Array.isArray(p?.chaves_envio) && p.chaves_envio.includes(chaveEnvio);
-    if (jaAplicada(pedidoAtual)) return res.json({ success: true, repetido: true, order: pedidoAtual });
+    // 🔐 cardápio da mesa (sem login): só com a sessão do QR, e só no pedido aberto da mesa dela
+    let sessaoMesa = null;
+    if (!readAuth(req)) {
+      sessaoMesa = await sessaoMesaValida(req.body?.sessao_mesa, pedidoAtual.restaurant_id);
+      if (!sessaoMesa) return res.status(410).json({ error: SESSAO_MESA_EXPIROU, codigo: "SESSAO_MESA" });
+      if (String(pedidoAtual.table_number) !== String(sessaoMesa.mesa) || !MESA_ATIVA.includes(pedidoAtual.status))
+        return sendError(res, 403, "Este pedido não é da sua mesa");
+    }
     // 🆔 formato novo: itens por ID (nome e preço do cardápio)
     let totalPorId = null;
     if (itens_novos.every(i => i && i.item_id != null)) {
@@ -2649,7 +2662,7 @@ console.log(`🖨️ Job de impressão adicionado — Pedido #${pedidoAtualizado
       console.error("⚠️ Erro na impressão ao adicionar itens:", printErr.message);
     }
 
-    return res.json({ success: true, order: pedidoAtualizado });
+    if (sessaoMesa) marcarSessaoMesa(sessaoMesa.token);
   } catch (err) {
     return sendError(res, 500, "Erro interno ao adicionar itens");
   }
@@ -2926,9 +2939,10 @@ app.post("/api/v1/pedidos", async (req, res) => {
     const {
       restaurant_id, client_name, client_phone, items, itens, notes,
       service_type, address, payment_method, total_price: total_price_cliente, origin,
-      status, order_id, table_number
+      status, order_id
     } = req.body || {};
-
+    let { table_number } = req.body || {};
+    
     let normalizedItems = Array.isArray(items) ? items : Array.isArray(itens) ? itens : [];
     const phone = normalizePhone(client_phone);
  const finalOrigin = origin || "outros";
@@ -2976,7 +2990,15 @@ app.post("/api/v1/pedidos", async (req, res) => {
     }
     // pedido da mesa/QR sem login entra sempre como novo: quem finaliza e recebe é o caixa
     if (publico && !ehDeliveryPublico) finalStatus = "pending";
-
+    // 🔐 cardápio da mesa (sem login): só com a sessão que o QR da mesa abriu; o número da mesa vem dela, nunca do aparelho
+    let sessaoMesa = null;
+    if (publico && !ehDeliveryPublico) {
+      if (order_id) return sendError(res, 403, "Este pedido não pode ser alterado por aqui");
+      sessaoMesa = await sessaoMesaValida(req.body?.sessao_mesa, restaurant_id);
+      if (!sessaoMesa) return res.status(410).json({ error: SESSAO_MESA_EXPIROU, codigo: "SESSAO_MESA" });
+      table_number = sessaoMesa.mesa;
+    }
+    
     if (ehDeliveryPublico) {
       // o cardápio delivery só cria rascunho (draft) ou confirma (pending)
       if (!["draft", "pending"].includes(finalStatus)) return sendError(res, 400, "Status inválido");
@@ -3214,6 +3236,7 @@ const trackingLink = dominioApp
 // ⭐ FIM FIDELIZAÇÃO
 
 emitOrderUpdate(restaurant_id, resultData); // dispara o socket
+  if (sessaoMesa) marcarSessaoMesa(sessaoMesa.token);
 return res.status(201).json({ 
   success: true, 
   order: resultData,
@@ -5254,6 +5277,162 @@ app.get("/api/v1/dominio-cardapio/:dominio", async (req, res) => {
     .single();
   if (error || !data) return sendError(res, 404, "Domínio não encontrado");
   return res.json({ restaurant_id: data.id });
+});
+
+/* ========================================
+   🔐 QR DAS MESAS + SESSÃO DESCARTÁVEL
+   Cada mesa tem um código aleatório (impresso uma vez): https://dominio/?m=CODIGO.
+   Ao ler, o cardápio troca o código por uma sessão só daquele celular (o link vira ?s=SESSAO).
+   A sessão morre quando a conta da mesa fecha ou depois de 1 hora sem pedido.
+   Todo pedido de mesa sem login precisa de uma sessão viva — a mesa sai dela, nunca do aparelho.
+======================================== */
+const MESA_ATIVA = ["pending", "preparing", "mounting"];
+const SESSAO_MESA_MIN = 60; // minutos sem pedido até a página expirar
+const SESSAO_MESA_EXPIROU = "Esta página expirou. Leia o QR Code da mesa novamente.";
+const CODIGO_LETRAS = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ"; // sem 0/O, 1/l/I (ninguém confunde)
+const novoCodigoMesa = () => Array.from({ length: 8 }, () => CODIGO_LETRAS[crypto.randomInt(CODIGO_LETRAS.length)]).join("");
+const tokenValido = (t) => typeof t === "string" && /^[A-Za-z0-9_-]{20,64}$/.test(t);
+const codigoValido = (c) => typeof c === "string" && /^[A-Za-z0-9]{6,16}$/.test(c);
+
+async function numMesas(rid) {
+  const { data } = await supabase.from("restaurante_config").select("num_mesas").eq("restaurant_id", rid).maybeSingle();
+  return Math.max(0, Math.min(200, Number(data?.num_mesas) || 10));
+}
+async function encerrarSessoesMesa(rid, mesa = null) {
+  let q = supabase.from("mesa_sessoes").update({ encerrada_em: new Date().toISOString() }).eq("restaurant_id", rid).is("encerrada_em", null);
+  if (mesa != null) q = q.eq("mesa", mesa);
+  await q;
+}
+// sessão viva? (morre: encerrada, 1h sem pedido, ou já pediu e a conta da mesa fechou)
+async function sessaoMesaValida(token, rid) {
+  if (!tokenValido(token)) return null;
+  const { data: s } = await supabase.from("mesa_sessoes").select("*").eq("token", token).maybeSingle();
+  if (!s || s.encerrada_em || (rid && s.restaurant_id !== rid)) return null;
+  const morre = async () => { await supabase.from("mesa_sessoes").update({ encerrada_em: new Date().toISOString() }).eq("token", token); return null; };
+  if (Date.now() - new Date(s.ultimo_uso).getTime() > SESSAO_MESA_MIN * 60 * 1000) return morre();
+  const { data: qr } = await supabase.from("mesas_qr").select("mesa").eq("restaurant_id", s.restaurant_id).eq("mesa", s.mesa).maybeSingle();
+  if (!qr || s.mesa > await numMesas(s.restaurant_id)) return morre(); // a mesa saiu
+  if (s.teve_pedido) {
+    const { data: aberto } = await supabase.from("orders").select("id").eq("restaurant_id", s.restaurant_id)
+      .eq("table_number", String(s.mesa)).in("status", MESA_ATIVA).limit(1);
+    if (!aberto?.length) return morre(); // pediu e a conta já fechou: acabou essa visita
+  }
+  return s;
+}
+function marcarSessaoMesa(token) { // pediu: conta como uso e passa a morrer junto com a conta
+  supabase.from("mesa_sessoes").update({ ultimo_uso: new Date().toISOString(), teve_pedido: true }).eq("token", token)
+    .then(() => {}, (e) => console.warn("⚠️ sessão da mesa:", e?.message));
+}
+// garante um código pra cada mesa de 1 até o número de mesas (as que já têm, continuam iguais)
+async function codigosDasMesas(rid) {
+  const total = await numMesas(rid);
+  const { data } = await supabase.from("mesas_qr").select("mesa, codigo").eq("restaurant_id", rid).order("mesa");
+  const tem = new Map((data || []).map(r => [r.mesa, r.codigo]));
+  const faltam = [];
+  for (let m = 1; m <= total; m++) if (!tem.has(m)) faltam.push({ restaurant_id: rid, mesa: m, codigo: novoCodigoMesa() });
+  if (faltam.length) {
+    const { error } = await supabase.from("mesas_qr").insert(faltam);
+    if (error) throw error;
+    faltam.forEach(f => tem.set(f.mesa, f.codigo));
+  }
+  return { total, mesas: [...tem].filter(([m]) => m <= total).sort((a, b) => a[0] - b[0]).map(([mesa, codigo]) => ({ mesa, codigo })) };
+}
+async function respostaMesasQr(rid) {
+  const [{ total, mesas }, { data: r }, { data: abertos }] = await Promise.all([
+    codigosDasMesas(rid),
+    supabase.from("restaurants").select("cardapio_url").eq("id", rid).maybeSingle(),
+    supabase.from("orders").select("table_number").eq("restaurant_id", rid).in("status", MESA_ATIVA).not("table_number", "is", null)
+  ]);
+  const ocupadas = new Set((abertos || []).map(o => String(o.table_number)));
+  return { dominio: r?.cardapio_url || null, num_mesas: total, mesas: mesas.map(m => ({ ...m, ocupada: ocupadas.has(String(m.mesa)) })) };
+}
+
+const limiterMesa = rateLimit({ // ler o QR: o Wi-Fi do restaurante é um IP só pra muita gente
+  windowMs: 60 * 1000, max: 60,
+  message: { error: "Muitas tentativas. Aguarde 1 minuto." },
+  standardHeaders: true, legacyHeaders: false
+});
+
+// o cliente leu o QR: troca o código da mesa por uma sessão só desse celular
+app.post("/api/v1/mesa/entrar", limiterMesa, async (req, res) => {
+  try {
+    const { restaurant_id, codigo } = req.body || {};
+    if (!restaurant_id || !codigoValido(codigo)) return sendError(res, 404, "QR Code inválido. Chame o garçom.");
+    const { data: qr } = await supabase.from("mesas_qr").select("restaurant_id, mesa").eq("codigo", codigo).maybeSingle();
+    if (!qr || qr.restaurant_id !== restaurant_id || qr.mesa > await numMesas(restaurant_id))
+      return sendError(res, 404, "Este QR Code não vale mais. Chame o garçom.");
+    const token = crypto.randomBytes(24).toString("base64url");
+    const agora = new Date().toISOString();
+    const { error } = await supabase.from("mesa_sessoes").insert([{ token, restaurant_id, mesa: qr.mesa, criado_em: agora, ultimo_uso: agora, teve_pedido: false }]);
+    if (error) throw error;
+    return res.json({ token, mesa: qr.mesa, expira_minutos: SESSAO_MESA_MIN });
+  } catch (err) {
+    console.error("❌ mesa/entrar:", err.message);
+    return sendError(res, 500, "Não deu pra abrir o cardápio da mesa. Tente de novo.");
+  }
+});
+// a página da mesa ainda vale? (ao abrir ou recarregar)
+app.get("/api/v1/mesa/sessao/:token", limiterMesa, async (req, res) => {
+  const s = await sessaoMesaValida(req.params.token, req.query.restaurant_id).catch(() => null);
+  if (!s) return res.status(410).json({ error: SESSAO_MESA_EXPIROU, codigo: "SESSAO_MESA" });
+  return res.json({ mesa: s.mesa, restaurant_id: s.restaurant_id });
+});
+
+// ---- Operacional → Autoatendimento: os QRs ficam salvos (o impresso é sempre o que aparece na tela) ----
+app.use("/api/v1/restaurante/:restaurant_id/mesas-qr", requireAuth);
+app.get("/api/v1/restaurante/:restaurant_id/mesas-qr", async (req, res) => {
+  try { return res.json(await respostaMesasQr(req.params.restaurant_id)); }
+  catch (err) { console.error("❌ mesas-qr:", err.message); return sendError(res, 500, "Erro ao carregar os QR Codes"); }
+});
+// adicionar mesas: começa sempre na próxima (ex.: tem 20 → cria a 21 em diante)
+app.post("/api/v1/restaurante/:restaurant_id/mesas-qr/adicionar", async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id;
+    const qtd = Math.round(Number(req.body?.quantidade));
+    if (!Number.isFinite(qtd) || qtd < 1 || qtd > 50) return sendError(res, 400, "Escolha de 1 a 50 mesas novas");
+    const atual = await numMesas(rid);
+    if (atual + qtd > 200) return sendError(res, 400, `Dá pra ter no máximo 200 mesas (hoje são ${atual})`);
+    const { data: cfg } = await supabase.from("restaurante_config").select("restaurant_id").eq("restaurant_id", rid).maybeSingle();
+    const { error } = cfg
+      ? await supabase.from("restaurante_config").update({ num_mesas: atual + qtd }).eq("restaurant_id", rid)
+      : await supabase.from("restaurante_config").insert([{ restaurant_id: rid, num_mesas: atual + qtd }]);
+    if (error) throw error;
+    return res.json({ ...(await respostaMesasQr(rid)), novas: { de: atual + 1, ate: atual + qtd } });
+  } catch (err) { console.error("❌ mesas-qr/adicionar:", err.message); return sendError(res, 500, "Erro ao adicionar mesas"); }
+});
+// remover a última mesa (só se ela não estiver com conta aberta)
+app.post("/api/v1/restaurante/:restaurant_id/mesas-qr/remover", async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id;
+    const atual = await numMesas(rid);
+    if (atual <= 1) return sendError(res, 400, "O restaurante precisa ter pelo menos 1 mesa");
+    const { data: aberto } = await supabase.from("orders").select("id").eq("restaurant_id", rid)
+      .eq("table_number", String(atual)).in("status", MESA_ATIVA).limit(1);
+    if (aberto?.length) return sendError(res, 409, `A mesa ${atual} está com conta aberta. Feche a conta antes de remover.`);
+    const { error } = await supabase.from("restaurante_config").update({ num_mesas: atual - 1 }).eq("restaurant_id", rid);
+    if (error) throw error;
+    await supabase.from("mesas_qr").delete().eq("restaurant_id", rid).eq("mesa", atual);
+    await encerrarSessoesMesa(rid, atual);
+    return res.json(await respostaMesasQr(rid));
+  } catch (err) { console.error("❌ mesas-qr/remover:", err.message); return sendError(res, 500, "Erro ao remover a mesa"); }
+});
+// trocar o QR de uma mesa (plaquinha perdida) ou de todas (vazou): o antigo para de valer na hora
+app.post("/api/v1/restaurante/:restaurant_id/mesas-qr/trocar", async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id;
+    const todas = req.body?.todas === true;
+    const mesa = Math.round(Number(req.body?.mesa));
+    const total = await numMesas(rid);
+    if (!todas && (!Number.isFinite(mesa) || mesa < 1 || mesa > total)) return sendError(res, 400, "Mesa inválida");
+    const alvo = todas ? Array.from({ length: total }, (_, i) => i + 1) : [mesa];
+    let del = supabase.from("mesas_qr").delete().eq("restaurant_id", rid);
+    if (!todas) del = del.eq("mesa", mesa);
+    await del;
+    const { error } = await supabase.from("mesas_qr").insert(alvo.map(m => ({ restaurant_id: rid, mesa: m, codigo: novoCodigoMesa() })));
+    if (error) throw error;
+    await encerrarSessoesMesa(rid, todas ? null : mesa);
+    return res.json(await respostaMesasQr(rid));
+  } catch (err) { console.error("❌ mesas-qr/trocar:", err.message); return sendError(res, 500, "Erro ao trocar o QR Code"); }
 });
 
 /* ========================================
