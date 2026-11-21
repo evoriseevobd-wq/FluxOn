@@ -1877,3 +1877,26 @@ body.nav-presa .cat-nav.com-fotos .cat-nome{ -webkit-line-clamp:1; font-size:11p
 .nasc-pular{ display:block; width:100%; margin-top:8px; padding:12px; border:0; background:none; color:var(--muted); font-size:14px; font-weight:700; cursor:pointer; }
 .nasc-pular:hover{ color:var(--text); }
 .nasc-nota{ display:block; margin-top:6px; font-size:12px; color:var(--muted); }
+
+
+  /* ➕ adicionais (popup do item e carrinho) */
+  .adc-box{ margin-top:16px; display:grid; gap:12px; }
+  .adc-titulo{ font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .adc-grupo{ display:grid; gap:6px; }
+  .adc-grupo-topo{ display:flex; justify-content:space-between; align-items:baseline; font-size:13.5px; color:var(--text); }
+  .adc-grupo-topo small{ font-size:11.5px; color:var(--muted); }
+  .adc-linha{ display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:center; padding:9px 12px; border-radius:10px; background:var(--surface); border:1px solid var(--line); transition:border-color .2s ease, background .2s ease; }
+  .adc-linha.on{ border-color:var(--red); background:linear-gradient(90deg, color-mix(in srgb, var(--red) 10%, transparent), transparent); }
+  .adc-nome{ font-size:13.5px; font-weight:600; color:var(--text); }
+  .adc-valor{ font-size:12.5px; color:var(--muted); white-space:nowrap; }
+  .adc-qtd{ display:flex; align-items:center; gap:6px; }
+  .adc-qtd b{ min-width:14px; text-align:center; font-size:13.5px; color:var(--text); }
+  .adc-qtd button{ width:28px; height:28px; border-radius:50%; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:15px; font-weight:700; line-height:1; }
+  .adc-qtd button:disabled{ opacity:.3; }
+  .receipt-item{ flex-wrap:wrap; }
+  .ri-extra{ flex-basis:100%; display:grid; gap:3px; }
+  .ri-adc{ font-size:12.5px; color:var(--muted); padding-left:2px; }
+  .ri-obs{ width:100%; margin-top:2px; padding:6px 2px; border:0; border-bottom:1px dashed var(--line); background:transparent; color:var(--text); font:inherit; font-size:12.5px; outline:none; }
+  .ri-obs:focus{ border-bottom:1px solid var(--red); }
+  .ri-obs::placeholder{ color:var(--muted-2); }
+
