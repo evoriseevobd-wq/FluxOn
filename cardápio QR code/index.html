@@ -267,6 +267,26 @@ html { scroll-behavior: smooth; }
     }
     .counter-btn:hover { background: var(--ink); border-color: var(--ink); color: #fff; }
     .counter-qty { font-size: 14px; font-weight: 700; min-width: 18px; text-align: center; }
+    
+    /* ── ADICIONAIS (popup do item e carrinho) ── */
+    .qr-adc { display:grid; gap:12px; }
+    .qr-adc-titulo { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; }
+    .qr-adc-grupo { display:grid; gap:6px; }
+    .qr-adc-topo { display:flex; justify-content:space-between; align-items:baseline; font-size:14px; color:var(--ink); }
+    .qr-adc-topo small { font-size:12px; color:var(--muted); }
+    .qr-adc-linha { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:center; padding:10px 14px; border:1.5px solid var(--border-dk); border-radius:10px; }
+    .qr-adc-linha.on { border-color:var(--ink); }
+    .qr-adc-nome { font-size:14px; font-weight:500; color:var(--ink); }
+    .qr-adc-valor { font-size:12.5px; color:var(--muted); white-space:nowrap; }
+    .qr-adc-qtd { display:flex; align-items:center; gap:8px; }
+    .qr-adc-qtd b { min-width:14px; text-align:center; font-size:14px; color:var(--ink); }
+    .qr-adc-qtd button { width:28px; height:28px; border-radius:50%; border:1.5px solid var(--border-dk); background:transparent; color:var(--ink); font-size:15px; cursor:pointer; line-height:1; }
+    .qr-adc-qtd button:disabled { opacity:0.3; cursor:default; }
+    .cart-item { flex-wrap:wrap; }
+    .cart-item-extra { flex-basis:100%; display:grid; gap:3px; }
+    .cart-item-adc { font-size:12.5px; color:var(--muted); }
+    .cart-item-obs { width:100%; padding:6px 2px; border:0; border-bottom:1px dashed var(--border-dk); background:transparent; color:var(--ink); font:inherit; font-size:12.5px; outline:none; }
+    .cart-item-obs:focus { border-bottom:1px solid var(--ink); }
 
     /* ── CART FAB ── */
     .cart-fab {
@@ -642,6 +662,7 @@ html { scroll-behavior: smooth; }
     let mesaNum = null;
     let cardapioItems = [];
     let cart = {};
+        let adicionaisPorCat = {}; // categoria → listas de adicionais (o cardápio não repete em cada item)
    let tutorialDone = false;
 let pedidoAtivo = null;
 let modoAdicao = false;
@@ -1046,6 +1067,7 @@ function toggleCatFloat(row) {
   if (e) e.stopPropagation();
   const item = cardapioItems.find(i => i.id === itemId);
   if (!item) return;
+ if (adcDoItem(item).length && !cart[itemId]) return openItemDetailModal(item); // oferece os adicionais
   if (cart[itemId]) {
     cart[itemId].qty++;
   } else {
@@ -1110,17 +1132,21 @@ function refreshItemCard(itemId) {
         body.innerHTML = `<div class="cart-empty"><div class="icon">🛒</div><p>Seu carrinho está vazio</p></div>`;
         return;
       }
-      body.innerHTML = items.map(({item, qty}, idx) => {
+      body.innerHTML = items.map(({item, qty, adicionais, obs}, idx) => {
         const key = Object.keys(cart)[idx];
         return `
         <div class="cart-item">
           <div class="cart-item-name">${escHtml(item.nome)}</div>
           <div class="cart-item-qty">
-            <button class="cart-qty-btn" onclick="changeCartQty('${key}',-1)">−</button>
+            <button class="cart-qty-btn" onclick="changeCartQty('${escHtml(key)}',-1)">−</button>
             <span class="cart-qty-num">${qty}</span>
-            <button class="cart-qty-btn" onclick="changeCartQty('${key}',1)">+</button>
+            <button class="cart-qty-btn" onclick="changeCartQty('${escHtml(key)}',1)">+</button>
           </div>
           <div class="cart-item-price">${formatCurrency(qty * parseFloat(item.preco||0))}</div>
+          <div class="cart-item-extra">
+            ${(adicionais || []).map(a => `<div class="cart-item-adc">+ ${a.qtd > 1 ? a.qtd + 'x ' : ''}${escHtml(a.nome)}</div>`).join('')}
+            <input class="cart-item-obs" data-obs-key="${escHtml(key)}" maxlength="140" value="${escHtml(obs || '')}" placeholder="Alguma observação para este item?" oninput="if(cart[this.dataset.obsKey]) cart[this.dataset.obsKey].obs = this.value" />
+          </div>
         </div>`;
       }).join('');
     }
@@ -1241,6 +1267,8 @@ async function submitOrder() {
         item_id: c.itemId ?? c.item.id,
         opcao_id: c.opcao_id || null,
         ...(c.sabores ? { sabores: c.sabores } : {}),
+       ...(c.adicionais && c.adicionais.length ? { adicionais: c.adicionais.map(a => ({ id: a.id, qtd: a.qtd })) } : {}),
+        ...(String(c.obs || '').trim() ? { obs: String(c.obs).trim().slice(0, 140) } : {}),
         qtd: c.qty
       }));
       chaveEnvioMesa = chaveEnvioMesa || novaChaveEnvio();
@@ -1287,6 +1315,40 @@ async function submitOrder() {
         btn.textContent = 'Fazer pedido';
       }
     }
+
+        /* ── ADICIONAIS ──
+       Cada categoria tem as suas listas; o cliente escolhe com − e + (limite de cada um e da lista). */
+    const adcDoItem = (item) => item?.sem_adicionais ? [] : (adicionaisPorCat[String(item?.categoria || '').trim().toLowerCase()] || []);
+    const somaAdc = (adc) => (adc || []).reduce((t, a) => t + a.preco * a.qtd, 0);
+    const assinaturaAdc = (adc) => (adc && adc.length) ? '_adc:' + adc.map(a => `${a.id}x${a.qtd}`).sort().join(',') : '';
+    function adcEscolhidos() {
+      const q = window._adcQtd || new Map();
+      return (window._adcListas || []).flatMap(l => l.itens).filter(a => q.get(a.id) > 0).map(a => ({ id: a.id, nome: a.nome, preco: a.preco, qtd: q.get(a.id) }));
+    }
+    function qrMontarAdc() {
+      const box = document.getElementById('qr-adc');
+      if (!box) return;
+      const q = window._adcQtd, listas = window._adcListas || [];
+      box.innerHTML = `<div class="qr-adc-titulo">Quer algum adicional?</div>` + listas.map(l => {
+        const naLista = l.itens.reduce((t, a) => t + (q.get(a.id) || 0), 0);
+        return `<div class="qr-adc-grupo"><div class="qr-adc-topo"><b>${escHtml(l.nome)}</b>${l.max ? `<small>até ${l.max}</small>` : ''}</div>
+          ${l.itens.map(a => { const n = q.get(a.id) || 0; return `
+            <div class="qr-adc-linha${n ? ' on' : ''}">
+              <span class="qr-adc-nome">${escHtml(a.nome)}</span>
+              <span class="qr-adc-valor">${a.preco > 0 ? '+ ' + formatCurrency(a.preco) : 'grátis'}</span>
+              <span class="qr-adc-qtd"><button type="button" data-adc-menos="${escHtml(a.id)}" ${n ? '' : 'disabled'} aria-label="Menos ${escHtml(a.nome)}">−</button><b>${n}</b><button type="button" data-adc-mais="${escHtml(a.id)}" ${n >= (a.max || 10) || (l.max && naLista >= l.max) ? 'disabled' : ''} aria-label="Mais ${escHtml(a.nome)}">+</button></span>
+            </div>`; }).join('')}</div>`;
+      }).join('');
+      const extra = somaAdc(adcEscolhidos()), btn = document.getElementById('btn-adicionar-modal');
+      if (btn) btn.textContent = extra > 0 ? `+ Adicionar · + ${formatCurrency(extra)}` : '+ Adicionar ao carrinho';
+    }
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('#qr-adc [data-adc-mais], #qr-adc [data-adc-menos]');
+      if (!b || b.disabled) return;
+      const id = b.dataset.adcMais || b.dataset.adcMenos;
+      window._adcQtd.set(id, Math.max(0, (window._adcQtd.get(id) || 0) + (b.dataset.adcMais ? 1 : -1)));
+      qrMontarAdc();
+    });
     
     /* ── ENVIO QUE NÃO SOME ──
        chave_envio: o mesmo envio repetido não cria outro pedido nem soma os itens de novo.
@@ -1467,6 +1529,7 @@ function openItemDetailModal(item) {
 </div>
 ` : ''}
 
+          ${adcDoItem(item).length ? `<div id="qr-adc" class="qr-adc"></div>` : ''}
           <div style="display:flex; gap:10px; margin-top:4px;">
             <button onclick="document.getElementById('item-detail-modal').remove()" style="
               flex:1; padding:14px; border-radius:var(--radius-sm);
@@ -1476,7 +1539,7 @@ function openItemDetailModal(item) {
             ${item.ativo ? `
             <button id="btn-adicionar-modal" onclick="adicionarDoModal('${item.id}')" style="
               flex:2; padding:14px; border-radius:var(--radius-sm);
-              border:none; background:var(--ink); color:white;
+              border:none; background:var(--ink); color:var(--white);
               font-family:'Outfit',sans-serif; font-size:14px; font-weight:600;
               cursor:pointer;">+ Adicionar ao carrinho</button>
             ` : ''}
@@ -1488,6 +1551,8 @@ function openItemDetailModal(item) {
 
   
   modal.innerHTML = buildModal();
+  window._adcQtd = new Map(); window._adcListas = adcDoItem(item);
+  setTimeout(qrMontarAdc, 0);
   window._carrosselIndex = 0;
   window._selectedOpcaoIdx = 0;
   window._currentItemOpcoes = opcoes;
@@ -1626,6 +1691,7 @@ if (op.texto_livre && (!op.preco || op.preco === 0)) {
 function adicionarDoModal(itemId) {
   const item = cardapioItems.find(i => i.id === itemId);
   if (!item) return;
+  const adc = adcEscolhidos();
 
   const opcoes = window._currentItemOpcoes;
   const temVariacao = Array.isArray(opcoes) && opcoes.length > 0;
@@ -1667,18 +1733,22 @@ const nomeCompleto = op.texto_livre
 
 // o pedido vai por id (item, opção e sabores): nome e preço quem decide é o cardápio no servidor
 const saborIds = op.texto_livre ? saboresSelecionados.map(n => cardapioItems.find(i => i.nome === n && i.categoria === item.categoria)?.id) : null;
-const chave = `${itemId}_${idx}` + (saborIds ? `_${[...saborIds].sort().join('+')}` : '');
+const chave = `${itemId}_${idx}` + (saborIds ? `_${[...saborIds].sort().join('+')}` : '') + assinaturaAdc(adc);
 if (cart[chave]) cart[chave].qty++;
 else cart[chave] = {
-  item: { ...item, nome: nomeCompleto, preco: precoFinal },
+  item: { ...item, nome: nomeCompleto, preco: (parseFloat(precoFinal) || 0) + somaAdc(adc) },
   qty: 1,
   itemId,
   opcao_id: op.id || null,
-  ...(saborIds ? { sabores: saborIds } : {})
+  ...(saborIds ? { sabores: saborIds } : {}),
+  ...(adc.length ? { adicionais: adc } : {})
 };
 } else {
-  if (cart[itemId]) cart[itemId].qty++;
-  else cart[itemId] = { item, qty: 1 };
+  const chave = itemId + assinaturaAdc(adc);
+  if (cart[chave]) cart[chave].qty++;
+  else cart[chave] = adc.length
+    ? { item: { ...item, preco: (parseFloat(item.preco) || 0) + somaAdc(adc) }, qty: 1, itemId, adicionais: adc }
+    : { item, qty: 1 };
 }
 document.getElementById('item-detail-modal')?.remove();
 updateCartUI();
@@ -1898,7 +1968,11 @@ async function loadCategorias() {
     
 async function loadCardapio() {
   try {
-    const resp = await fetch(`${API_BASE}/api/v1/cardapio/${restaurantId}`);
+    const [resp, adc] = await Promise.all([
+      fetch(`${API_BASE}/api/v1/cardapio/${restaurantId}`),
+      fetch(`${API_BASE}/api/v1/cardapio/${restaurantId}/adicionais`).then(r => r.ok ? r.json() : {}).catch(() => ({}))
+    ]);
+    adicionaisPorCat = adc || {};
     if (!resp.ok) throw new Error();
     const data = await resp.json();
     cardapioItems = Array.isArray(data) ? data.filter(item => item.ativo) : [];
