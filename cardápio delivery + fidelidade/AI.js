@@ -265,11 +265,19 @@ async function iaNoCarrinho(){
 function iaAdicionarAoCarrinho(lista){
   if(!Array.isArray(lista) || !lista.length) return;
   for(const a of lista){
-    const id = a.opcao ? `${a.id}__${a.opcao.nome}` : a.id;
+    // adicionais e observação vêm conferidos do servidor (id e preço do cardápio): combinação diferente = linha nova
+    const adc = Array.isArray(a.adicionais) ? a.adicionais : [];
+    const extra = adc.reduce((t, x) => t + (Number(x.preco) || 0) * (Number(x.qtd) || 1), 0);
+    const sufixo = (adc.length ? "__adc:" + adc.map(x => `${x.id}x${x.qtd}`).sort().join(",") : "") + (a.obs ? "__obs:" + a.obs : "");
+    const base = a.opcao ? `${a.id}__${a.opcao.nome}` : a.id;
+    const id = sufixo ? String(base) + sufixo : base;
     const ex = CART.find(c => String(c.id) === String(id));
     if(ex) ex.qty += a.qty;
-    else CART.push(a.opcao ? { id, item_id:a.id, opcao_id:a.opcao.id || null, nome:`${a.nome} — ${a.opcao.nome}`, preco:a.opcao.preco, qty:a.qty }
-      : { id, item_id:a.id, opcao_id:null, nome:a.nome, preco:a.preco, qty:a.qty });
+    else CART.push({
+      ...(a.opcao ? { id, item_id:a.id, opcao_id:a.opcao.id || null, nome:`${a.nome} — ${a.opcao.nome}`, preco:a.opcao.preco + extra, qty:a.qty }
+        : { id, item_id:a.id, opcao_id:null, nome:a.nome, preco:a.preco + extra, qty:a.qty }),
+      ...(adc.length ? { adicionais: adc } : {}), ...(a.obs ? { obs: a.obs } : {})
+    });
   }
   updateCartUI();
   const wrap = document.createElement("div");
@@ -282,13 +290,15 @@ function iaAdicionarAoCarrinho(lista){
 // no histórico vai também o que foi mostrado: é assim que "adiciona esse" sabe qual é
 function iaParaHistorico(resposta, data){
   const nomes = (data?.itens || []).map(i => i.nome).slice(0, 10);
-  return nomes.length ? `${resposta} [mostrei: ${nomes.join(", ")}]` : resposta;
+  // o sistema perguntou dos adicionais: marca no começo (é assim que o servidor sabe que já perguntou)
+  const perguntou = (data?.perguntou_adicionais || []).length ? `[perguntei adicionais: ${data.perguntou_adicionais.join("|")}] ` : "";
+  return perguntou + (nomes.length ? `${resposta} [mostrei: ${nomes.join(", ")}]` : resposta);
 }
 
 // manda o carrinho atual junto — é isso que deixa a IA sugerir
 // complementos (bebida, sobremesa etc) em vez de sugestões soltas
 function carrinhoParaIA(){
-  return CART.map(c => ({ nome:c.nome, qty:c.qty }));
+  return CART.map(c => ({ nome: c.nome + (c.adicionais || []).map(a => ` + ${a.qtd > 1 ? a.qtd + "x " : ""}${a.nome}`).join("") + (c.obs ? ` (${c.obs})` : ""), qty:c.qty }));
 }
 
 async function sendAiMessage(){
