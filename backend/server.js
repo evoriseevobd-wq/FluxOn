@@ -4487,7 +4487,7 @@ app.get("/api/v1/cardapio/:restaurant_id", async (req, res) => {
 
   let query = supabase
     .from("cardapio")
-    .select("id, nome, preco, categoria, ativo, descricao, foto_url, ordem, opcoes")
+    else if (totalPorId === null && publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
     .eq("restaurant_id", restaurant_id)
     .order("ordem");
 
@@ -4566,11 +4566,15 @@ app.post("/api/v1/cardapio/:restaurant_id/categorias", async (req, res) => {
 // PATCH - Renomeia/atualiza categoria (nome e/ou foto)
 app.patch("/api/v1/categorias/:id", requireRowOwner("categorias"), async (req, res) => {
   const { id } = req.params;
-  const { nome, foto_url } = req.body;
+  const { nome, foto_url, adicionais } = req.body;
 
   const updateData = {};
   if (nome && nome.trim()) updateData.nome = nome.trim();
   if (foto_url !== undefined) updateData.foto_url = foto_url;
+    if (adicionais !== undefined) { // listas de adicionais da categoria (os ids que já existiam continuam)
+    const { data: atual } = await supabase.from("categorias").select("adicionais").eq("id", id).maybeSingle();
+    updateData.adicionais = comIdsNosAdicionais(adicionais, atual?.adicionais);
+  }
 
   if (Object.keys(updateData).length === 0) return sendError(res, 400, "nada para atualizar");
  const { data: antes } = await supabase.from("categorias").select("nome, restaurant_id").eq("id", id).maybeSingle();
@@ -4616,7 +4620,7 @@ const qNorm = q.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerC
 
   const { data, error } = await supabase
     .from("cardapio")
-    .select("id, nome, preco, categoria, opcoes")
+    .select("id, nome, preco, categoria, opcoes, sem_adicionais")
     .eq("restaurant_id", restaurant_id)
     .eq("ativo", true)
     .ilike("nome", `%${qNorm}%`)
@@ -4799,12 +4803,68 @@ const _cardapioCache = new Map(); // restaurante → { em, itens } (1 min; limpa
 async function cardapioDoRestaurante(rid) {
   const c = _cardapioCache.get(String(rid));
   if (c && Date.now() - c.em < 60000) return c.itens;
-  const { data, error } = await supabase.from("cardapio")
-    .select("id, nome, preco, categoria, opcoes, ativo").eq("restaurant_id", rid);
+  const [{ data, error }, mapa] = await Promise.all([
+    supabase.from("cardapio").select("id, nome, preco, categoria, opcoes, ativo, sem_adicionais").eq("restaurant_id", rid),
+    adicionaisPorCategoria(rid)
+  ]);
   if (error) throw error;
-  _cardapioCache.set(String(rid), { em: Date.now(), itens: data || [] });
-  return data || [];
+  const itens = (data || []).map(i => ({ ...i, _adic: i.sem_adicionais ? [] : (mapa.get(catChave(i.categoria)) || []) }));
+  _cardapioCache.set(String(rid), { em: Date.now(), itens });
+  return itens;
 }
+
+/* ========================================
+   ➕ ADICIONAIS (por categoria)
+   Cada categoria tem as suas listas: categorias.adicionais =
+   [{ id, nome, max (quantos no total dessa lista; null = sem limite), itens: [{ id, nome, preco, max (de cada um), ativo }] }]
+   O pedido manda { id, qtd } de cada adicional; o preço sai daqui e fica gravado no pedido.
+======================================== */
+function comIdsNosAdicionais(listas, antigas = []) {
+  if (!Array.isArray(listas)) return [];
+  const velhas = Array.isArray(antigas) ? antigas : [];
+  const usados = new Set();
+  const novoId = (pref, atual, candidatos, nome) => {
+    let id = typeof atual === "string" && new RegExp(`^${pref}_[a-z0-9]{6,20}$`).test(atual) && !usados.has(atual) ? atual : null;
+    if (!id) id = (candidatos || []).find(v => v?.id && !usados.has(v.id) && _norm(v.nome) === _norm(nome))?.id || null;
+    if (!id) id = `${pref}_` + crypto.randomBytes(5).toString("hex");
+    usados.add(id);
+    return id;
+  };
+  const inteiro = (v, min, max) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= min ? Math.min(n, max) : null; };
+  return listas.slice(0, 20).map((l) => {
+    const nome = String(l?.nome || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    if (!nome) return null;
+    const velha = velhas.find(v => v?.id === l?.id) || velhas.find(v => _norm(v?.nome) === _norm(nome));
+    const itens = (Array.isArray(l?.itens) ? l.itens : []).slice(0, 60).map((a) => {
+      const n = String(a?.nome || "").replace(/\s+/g, " ").trim().slice(0, 50);
+      if (!n) return null;
+      const preco = Math.round(Math.max(0, Math.min(10000, Number(a?.preco) || 0)) * 100) / 100;
+      return { id: novoId("ad", a?.id, velha?.itens, n), nome: n, preco, max: inteiro(a?.max, 1, 50) || 10, ativo: a?.ativo !== false };
+    }).filter(Boolean);
+    return { id: novoId("lst", l?.id, velhas, nome), nome, max: inteiro(l?.max, 1, 50), itens };
+  }).filter(Boolean);
+}
+// categoria (nome, sem diferenciar maiúscula) → as listas dela
+async function adicionaisPorCategoria(rid) {
+  const { data } = await supabase.from("categorias").select("nome, adicionais").eq("restaurant_id", rid);
+  return new Map((data || []).filter(c => Array.isArray(c.adicionais) && c.adicionais.length).map(c => [catChave(c.nome), c.adicionais]));
+}
+// o que o cliente vê: só as listas com algum adicional ativo (pausado some na hora)
+const adicionaisVisiveis = (listas) => (Array.isArray(listas) ? listas : [])
+  .map(l => ({ id: l.id, nome: l.nome, max: l.max || null, itens: (l.itens || []).filter(a => a.ativo !== false).map(a => ({ id: a.id, nome: a.nome, preco: a.preco, max: a.max || 10 })) }))
+  .filter(l => l.itens.length);
+// os apps baixam as listas uma vez só, por categoria (o item só aponta pra categoria dele e diz se aceita)
+app.get("/api/v1/cardapio/:restaurant_id/adicionais", async (req, res) => {
+  try {
+    const mapa = await adicionaisPorCategoria(req.params.restaurant_id);
+    const out = {};
+    for (const [cat, listas] of mapa) { const v = adicionaisVisiveis(listas); if (v.length) out[cat] = v; }
+    res.set("Cache-Control", "no-store");
+    return res.json(out);
+  } catch (err) {
+    return sendError(res, 500, "Erro ao buscar adicionais");
+  }
+});
 const _norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 const _r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
@@ -4867,12 +4927,41 @@ async function montarItensPorId(rid, lista, { precoLivre = false } = {}) {
       if (!Number.isFinite(digitado) || digitado < 0 || digitado > 100000) return { erro: `Valor inválido em ${it.nome}` };
       preco = digitado;
     }
+        // ➕ adicionais da categoria (o limite de cada um e o da lista) — o preço é por unidade do item
+    let adicionais = null;
+    const precoBase = _r2(preco);
+    if (Array.isArray(e.adicionais) && e.adicionais.length) {
+      if (e.adicionais.length > 60) return { erro: `Adicionais demais em ${it.nome}` };
+      const somados = new Map();
+      for (const a of e.adicionais) {
+        const q = a?.qtd ?? 1;
+        if (typeof q !== "number" || !Number.isInteger(q) || q < 1 || q > 50) return { erro: `Quantidade inválida nos adicionais de ${it.nome}` };
+        somados.set(String(a?.id || ""), (somados.get(String(a?.id || "")) || 0) + q);
+      }
+      adicionais = [];
+      const porLista = new Map();
+      for (const [id, q] of somados) {
+        let ach = null, lista = null;
+        for (const l of it._adic || []) { const x = (l.itens || []).find(i => i.id === id); if (x) { ach = x; lista = l; break; } }
+        if (!ach) return { erro: `Um adicional de ${it.nome} saiu do cardápio. Atualize a página e monte de novo.` };
+        if (ach.ativo === false) return { erro: `${ach.nome} acabou. Tire dos adicionais de ${it.nome} para continuar.` };
+        if (q > (ach.max || 10)) return { erro: `${ach.nome}: no máximo ${ach.max || 10} em ${it.nome}` };
+        porLista.set(lista.id, (porLista.get(lista.id) || 0) + q);
+        if (lista.max && porLista.get(lista.id) > lista.max) return { erro: `${lista.nome}: escolha no máximo ${lista.max} em ${it.nome}` };
+        const p = _r2(ach.preco);
+        preco += p * q;
+        adicionais.push({ id: ach.id, nome: ach.nome, preco: p, qtd: q });
+      }
+    }
+    const obs = typeof e.obs === "string" ? e.obs.replace(/\s+/g, " ").trim().slice(0, 140) : "";
     preco = _r2(preco);
     total += preco * qty;
     itens.push({
       item_id: it.id, cardapio_id: String(it.id), opcao_id: op?.id || null,
       ...(sabores ? { sabores: sabores.map(s => s.id) } : {}),
-      name: nome, nome, price: preco, preco, qty, quantidade: qty
+      name: nome, nome, price: preco, preco, qty, quantidade: qty,
+      ...(adicionais?.length ? { adicionais, preco_base: precoBase } : {}),
+      ...(obs ? { obs } : {})
     });
   }
   return { itens, total: _r2(total) };
@@ -5048,12 +5137,12 @@ app.patch("/api/v1/cardapio/:restaurant_id/ordem-categorias", async (req, res) =
 
 // POST - Cria item
 app.post("/api/v1/cardapio", async (req, res) => {
-  const { restaurant_id, nome, descricao, preco, categoria, foto_url, ordem, opcoes } = req.body;
+  const { restaurant_id, nome, descricao, preco, categoria, foto_url, ordem, opcoes, sem_adicionais } = req.body;
  if (!restaurant_id || !nome) return sendError(res, 400, "Campos obrigatórios: restaurant_id, nome");
 
   const { data, error } = await supabase
     .from("cardapio")
-    .insert([{ restaurant_id, nome, descricao, preco, categoria: categoria || "Geral", foto_url, ordem: ordem || 0, opcoes: comIdsNasOpcoes(opcoes) }])
+    .insert([{ restaurant_id, nome, descricao, preco, categoria: categoria || "Geral", foto_url, ordem: ordem || 0, opcoes: comIdsNasOpcoes(opcoes), sem_adicionais: sem_adicionais === true }])
     .select().single();
 
   if (error) return sendError(res, 500, "Erro ao criar item");
@@ -5063,7 +5152,8 @@ app.post("/api/v1/cardapio", async (req, res) => {
 // PATCH - Edita item
 app.patch("/api/v1/cardapio/:id", requireRowOwner("cardapio"), async (req, res) => {
   const { id } = req.params;
-  const mudar = pick(req.body, ["nome","descricao","preco","categoria","foto_url","ordem","opcoes","ativo"]);
+  const mudar = pick(req.body, ["nome","descricao","preco","categoria","foto_url","ordem","opcoes","ativo","sem_adicionais"]);
+  if ("sem_adicionais" in mudar) mudar.sem_adicionais = mudar.sem_adicionais === true;
   if ("opcoes" in mudar) { // opções mantêm o id que já tinham (o pedido por ID depende dele)
     const { data: atual } = await supabase.from("cardapio").select("opcoes").eq("id", id).maybeSingle();
     mudar.opcoes = comIdsNasOpcoes(mudar.opcoes, atual?.opcoes);
@@ -6233,6 +6323,7 @@ async function printOrder(order, apiKey, printerId, is_caixa = false, nfce = nul
 
       totalRecalculado += preco * qty;
       return { nome, qty, preco };
+     return { nome, qty, preco, adicionais: Array.isArray(it.adicionais) ? it.adicionais : [], obs: String(it.obs || "").trim() };
     }));
 
     const totalFinal = parseFloat(order.total_price || 0) > 0
@@ -6327,6 +6418,8 @@ if (order.client_phone) { txt(`Telefone : ${order.client_phone}`); lf(); }
   b(GS, 0x21, 0x01);
   txt(`${it.qty}x ${it.nome}`); lf();
   b(GS, 0x21, 0x00);
+  for (const a of it.adicionais) { txt(`    + ${a.qtd > 1 ? a.qtd + "x " : ""}${a.nome}`); lf(); }
+  if (it.obs) { b(ESC, 0x45, 0x01); b(GS, 0x21, 0x01); txt(`  >> ${it.obs.toUpperCase()}`); b(GS, 0x21, 0x00); b(ESC, 0x45, 0x00); lf(); }
 }
 
       lineDash();
@@ -6387,6 +6480,8 @@ lf();
         const qty   = String(it.qty).padStart(5);
         const valor = `R$${(it.preco * it.qty).toFixed(2)}`.padStart(9);
         txt(`${nome}${qty} ${valor}`); lf();
+         for (const a of it.adicionais) { txt(`  + ${a.qtd > 1 ? a.qtd + "x " : ""}${a.nome}`.substring(0, 48)); lf(); }
+        if (it.obs) { b(ESC, 0x45, 0x01); txt(`  >> ${it.obs}`.substring(0, 96)); b(ESC, 0x45, 0x00); lf(); }
       }
 
       lineDash();
