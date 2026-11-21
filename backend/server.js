@@ -3034,7 +3034,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
       if (a.erro) return res.status(a.status).json({ error: a.erro, codigo: a.codigo });
       descontoAut = { funcionario: a.funcionario, valor: _r2(totalPorId - Number(total_price)), de: totalPorId, para: _r2(Number(total_price)) };
     }
-    else if (publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
+    else if (totalPorId === null && publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
       const { total: totalServidor, naoEncontrados, divergentes } = await calcularTotalServidor(restaurant_id, normalizedItems);
       const diverge = Math.abs(totalServidor - (parseFloat(total_price_cliente) || 0)) > 0.01;
       if (naoEncontrados.length > 0 || diverge) {
@@ -4487,7 +4487,7 @@ app.get("/api/v1/cardapio/:restaurant_id", async (req, res) => {
 
   let query = supabase
     .from("cardapio")
-    else if (totalPorId === null && publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
+    .select("id, nome, preco, categoria, ativo, descricao, foto_url, ordem, opcoes, sem_adicionais")
     .eq("restaurant_id", restaurant_id)
     .order("ordem");
 
@@ -6322,7 +6322,6 @@ async function printOrder(order, apiKey, printerId, is_caixa = false, nfce = nul
       }
 
       totalRecalculado += preco * qty;
-      return { nome, qty, preco };
      return { nome, qty, preco, adicionais: Array.isArray(it.adicionais) ? it.adicionais : [], obs: String(it.obs || "").trim() };
     }));
 
