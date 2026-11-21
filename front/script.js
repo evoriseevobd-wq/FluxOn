@@ -1621,10 +1621,12 @@ function cancelarPedidosMesa(key) {
     : String(o.table_number) === String(key))
 );
 if (pedidosAtivos.length === 0) return;
-showConfirmModal("Tem certeza que deseja cancelar o(s) pedido(s) desta mesa?", async () => {
-  await Promise.all(pedidosAtivos.map(p => updateOrderStatus(p.id, "cancelado")));
+(async () => {
+  let aut = await pedirAutorizacao({ titulo: isBalcao ? "Cancelar pedidos do balcão" : `Cancelar a mesa ${key}`, motivo: true,
+    texto: pedidosAtivos.length > 1 ? `Os ${pedidosAtivos.length} pedidos abertos serão cancelados.` : "O pedido aberto será cancelado." });
+  for (const p of pedidosAtivos) { if (!aut) break; aut = await updateOrderStatus(p.id, "cancelado", aut); }
   renderMesas();
-});
+})();
 }
 
 function editarPedidoMesa(key) {
@@ -2545,17 +2547,26 @@ function confirmarCaixaAberto() {
   return _caixaOk;
 }
 
-async function updateOrderStatus(orderId, newFrontStatus) {
+async function updateOrderStatus(orderId, newFrontStatus, autPronta) {
   const backStatus = toBackStatus(newFrontStatus);
   if (backStatus === "finished" && !(await confirmarCaixaAberto())) { renderBoard(); return; }
+  const cancelar = ["cancelled", "canceled"].includes(backStatus);
   try {
-    const resp = await fetch(`${API_URL}/${orderId}/status`, {
+    const mandar = (aut) => fetch(`${API_URL}/${orderId}/status`, {
       method: "PATCH",
       headers: buildHeaders(),
-      body: JSON.stringify({ status: backStatus }),
+      body: JSON.stringify({ status: backStatus, ...(aut || {}) }),
     });
-    
-    if (!resp.ok) throw new Error("Erro ao atualizar status");
+    let resp, autUsada = null;
+    if (cancelar) {
+      // cancelar: motivo obrigatório e, se o dono ligou o PIN, o PIN de quem autoriza (fica no registro do Owner)
+      const o = orders.find(x => x.id === orderId);
+      const env = await enviarComAutorizacao(mandar, { titulo: `Cancelar pedido${o?.order_number ? " #" + o.order_number : ""}`, motivo: true, aut: autPronta });
+      if (!env) { renderBoard(); return null; }
+      resp = env.resp; autUsada = env.aut;
+    } else resp = await mandar();
+
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.error || "Erro ao atualizar status"); }
     const atualizado = await resp.json().catch(() => null);
 
     const idx = orders.findIndex((o) => o.id === orderId);
@@ -2567,11 +2578,12 @@ async function updateOrderStatus(orderId, newFrontStatus) {
     }
     renderBoard();
     
-    // ❌ REMOVE ESTA LINHA:
-    // if (activeOrderId === orderId) openOrderModal(orderId);
+    return autUsada || true;
     
   } catch (e) {
     console.error(e);
+    if (cancelar) { alert(e.message); renderBoard(); }
+    return null;
   }
 }
 
@@ -4067,11 +4079,16 @@ origin: orderAtual?.origin || (tipoPedido === "mesa" || !!saveCreateBtn.dataset.
   } : {})
 };
 
-    const resp = await enviarComRetentativa(`${API_BASE}/api/v1/pedidos`, {
+    // desconto no total (cobrar menos que o cardápio): o servidor pede o PIN de quem autoriza, se o dono ligou o PIN
+    const somaItens = itens.reduce((t, i) => t + (Number(i.price) || 0) * (Number(i.qty) || 1), 0);
+    const env = await enviarComAutorizacao((aut) => enviarComRetentativa(`${API_BASE}/api/v1/pedidos`, {
       method: "POST",
       headers: buildHeaders(),
-      body: JSON.stringify(body),
-    });
+      body: JSON.stringify({ ...body, ...(aut?.pin ? { pin: aut.pin } : {}) }),
+    }), { titulo: "Desconto no total", texto: "Cobrar menos que o cardápio precisa do PIN de quem autoriza.",
+      pedirPin: body.total_price != null && Number(body.total_price) < somaItens - 0.009 });
+    if (!env) return;                                   // voltou sem autorizar: o pedido continua aberto pra mudar
+    const resp = env.resp;
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -9194,12 +9211,20 @@ function abrirAgendados() {
     const [acao, id] = b.dataset.ag.split(":");
     const o = _agendados.find(x => x.id === id);
     if (!o) return;
-    if (acao === "cancelar" && !confirm(`Cancelar o pedido #${o.order_number} de ${o.client_name || "cliente"}?\n\nO Pix de ${formatCurrency(Number(o.total_price))} volta para o cliente na hora e ele recebe um aviso no WhatsApp.`)) return;
-    b.disabled = true; b.textContent = acao === "cancelar" ? "Cancelando..." : "Enviando...";
+    const mandar = (aut) => fetch(`${API_URL}/${id}/status`, {
+      method: "PATCH", headers: buildHeaders(), body: JSON.stringify({ status: acao === "cancelar" ? "cancelled" : "pending", ...(aut || {}) })
+    });
     try {
-      const r = await fetch(`${API_URL}/${id}/status`, {
-        method: "PATCH", headers: buildHeaders(), body: JSON.stringify({ status: acao === "cancelar" ? "cancelled" : "pending" })
-      });
+      let r;
+      if (acao === "cancelar") {
+        const env = await enviarComAutorizacao(mandar, { titulo: `Cancelar o pedido #${o.order_number}`, motivo: true, botao: "Cancelar e devolver Pix",
+          texto: `O Pix de ${formatCurrency(Number(o.total_price))} volta para ${o.client_name || "o cliente"} na hora e ele recebe um aviso no WhatsApp.` });
+        if (!env) return;
+        r = env.resp;
+      } else {
+        b.disabled = true; b.textContent = "Enviando...";
+        r = await mandar();
+      }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "Não foi possível atualizar o pedido");
       if (acao === "cancelar" && d.estorno && d.estorno !== "ok")
@@ -9569,11 +9594,9 @@ window.novaChaveEnvio = () => (crypto.randomUUID ? crypto.randomUUID() : Date.no
 
 window.itensParaEnvio = function (lista) {
   const l = Array.isArray(lista) ? lista : [];
-  // pedido antigo (itens sem id): vai como antes, pelo nome
-  if (!l.length || !l.every((i) => i && i.item_id != null)) return l.map(({ item_id, opcao_id, sabores, ...r }) => {
-    const nome = r.name || r.nome || "", q = Number(r.qty ?? r.quantidade) || 1, p = Number(r.price ?? r.preco) || 0;
-    return { ...r, name: nome, nome, qty: q, quantidade: q, price: p, preco: p };
-  });
+  // item sem id (lançado antes da mudança): tira da lista e adiciona de novo pela busca
+  const semId = l.find((i) => !i || i.item_id == null);
+  if (semId) throw new Error(`"${semId?.name || semId?.nome || "item"}" foi lançado no formato antigo. Tire da lista e adicione de novo pela busca.`);
   return l.map((i) => ({
     item_id: i.item_id, opcao_id: i.opcao_id || null,
     ...(Array.isArray(i.sabores) && i.sabores.length ? { sabores: i.sabores } : {}),
@@ -9595,3 +9618,72 @@ window.enviarComRetentativa = async function (url, opcoes) {
   if (ultima) return ultima;
   throw new Error("Sem conexão com o servidor. Confira a internet e tente de novo: o pedido não vai duplicar.");
 };
+
+
+/* ========================================
+   🔐 AUTORIZAÇÃO (motivo e PIN)
+   Cancelar pede o motivo. Se o dono deu PIN pra alguém no Owner (Equipe, PIN e vales),
+   cancelar e dar desconto no total pedem também o PIN de quem autoriza. Tudo vai pro registro do Owner.
+======================================== */
+window._exigePin = false; // vira true na primeira vez que o servidor pedir o PIN (daí já pergunta junto)
+const AUT_MOTIVOS = ["Cliente desistiu", "Item em falta", "Pedido duplicado", "Erro no lançamento", "Demorou demais"];
+const AUT_CAMPO = "width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:15px; outline:none; font-family:inherit; box-sizing:border-box;";
+
+// abre o popup e devolve { motivo, pin } ou null (voltou)
+window.pedirAutorizacao = (op = {}) => new Promise((ok) => {
+  document.getElementById("aut-modal")?.remove();
+  const comPin = op.forcarPin || window._exigePin;
+  const m = document.createElement("div");
+  m.id = "aut-modal"; m.className = "modal-backdrop open";
+  m.innerHTML = `
+    <div class="modal confirm-modal" style="max-width:420px;">
+      <div class="modal-header"><h3>${escapeHtml(op.titulo || "Autorização")}</h3></div>
+      <div class="modal-body" style="display:grid; gap:12px;">
+        ${op.texto ? `<p style="margin:0; font-size:13px; color:rgba(252,228,228,0.7);">${escapeHtml(op.texto)}</p>` : ""}
+        ${op.motivo ? `
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">${AUT_MOTIVOS.map(t => `<button type="button" class="ghost-button" data-aut-motivo="${t}" style="flex:0 0 auto; width:auto; min-width:0; min-height:0; padding:7px 12px; font-size:12px; white-space:nowrap;">${t}</button>`).join("")}</div>
+          <textarea id="aut-motivo" rows="2" maxlength="200" placeholder="Motivo do cancelamento" style="${AUT_CAMPO} resize:vertical;">${escapeHtml(op.motivoAtual || "")}</textarea>` : ""}
+        ${comPin ? `<input id="aut-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de quem autoriza" style="${AUT_CAMPO} letter-spacing:4px;">` : ""}
+        <div id="aut-erro" style="font-size:12px; color:rgba(249,115,115,0.95);">${escapeHtml(op.erro || "")}</div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="ghost-button" data-aut-voltar>Voltar</button>
+        <button type="button" class="danger-button" data-aut-ok>${escapeHtml(op.botao || (op.motivo ? "Cancelar pedido" : "Autorizar"))}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  const fim = (v) => { m.remove(); ok(v); };
+  const erro = (t, campo) => { m.querySelector("#aut-erro").textContent = t; m.querySelector(campo)?.focus(); };
+  const confirmar = () => {
+    const motivo = op.motivo ? m.querySelector("#aut-motivo").value.replace(/\s+/g, " ").trim() : undefined;
+    const pin = comPin ? m.querySelector("#aut-pin").value.trim() : undefined;
+    if (op.motivo && motivo.length < 3) return erro("Escreva o motivo (ou toque num dos de cima).", "#aut-motivo");
+    if (comPin && !/^\d{4,6}$/.test(pin)) return erro("Digite o PIN (4 a 6 números).", "#aut-pin");
+    fim({ ...(motivo !== undefined ? { motivo } : {}), ...(pin ? { pin } : {}) });
+  };
+  m.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-aut-motivo]");
+    if (t) { m.querySelector("#aut-motivo").value = t.dataset.autMotivo; return (m.querySelector("#aut-pin") || m.querySelector("#aut-motivo")).focus(); }
+    if (e.target.closest("[data-aut-ok]")) return confirmar();
+    if (e.target === m || e.target.closest("[data-aut-voltar]")) fim(null);
+  });
+  m.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.id === "aut-pin") confirmar(); });
+  setTimeout(() => (m.querySelector("#aut-pin") || m.querySelector("#aut-motivo"))?.focus(), 50);
+});
+
+// manda a ação; se o servidor pedir o PIN (ou disser que está errado), pergunta e manda de novo
+// fazer(aut) → Response. Devolve { resp, aut } ou null (a pessoa voltou sem autorizar)
+window.enviarComAutorizacao = async function (fazer, op = {}) {
+  let aut = op.aut || ((op.motivo || (window._exigePin && op.pedirPin !== false)) ? await pedirAutorizacao(op) : {});
+  for (;;) {
+    if (!aut) return null;
+    const resp = await fazer(aut);
+    if (resp.status !== 403 && resp.status !== 429) return { resp, aut };
+    const d = await resp.clone().json().catch(() => ({}));
+    if (d.codigo !== "PIN") return { resp, aut };
+    window._exigePin = true;
+    aut = await pedirAutorizacao({ ...op, forcarPin: true, motivoAtual: aut.motivo, erro: aut.pin || resp.status === 429 ? d.error : "" });
+  }
+};
+
+
