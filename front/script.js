@@ -2564,9 +2564,6 @@ async function fetchOrders() {
     const homeView = document.getElementById("home-view");
     if (homeView && !homeView.classList.contains("hidden")) {
       renderHomeStats();
-    } else if (!window._jaNavegou) {
-      window._jaNavegou = true;
-      showHome();
     }
   }
 }
@@ -9871,6 +9868,7 @@ function adcAdminDesenhar(foco) {
   const corpo = document.getElementById("adc-admin-corpo");
   if (!corpo || !_adcEdit) return;
   const { listas, outras } = _adcEdit;
+    const rolagem = corpo.scrollTop; // redesenha sem perder onde a pessoa estava
   corpo.innerHTML = `
     <p class="adc-ajuda">Aparecem para o cliente em todos os itens de <b>${escapeHtml(_adcEdit.cat)}</b> (menos os marcados "Sem adicionais neste item").</p>
     ${listas.map((l, li) => `
@@ -9896,6 +9894,7 @@ function adcAdminDesenhar(foco) {
       ${outras.length ? `<select id="adc-copiar" style="${ADC_CAMPO}"><option value="">Copiar lista de outra categoria…</option>
         ${outras.map(c => c.adicionais.map((l, i) => `<option value="${escapeHtml(c.id)}:${i}">${escapeHtml(c.nome)} → ${escapeHtml(l.nome)}</option>`).join("")).join("")}</select>` : ""}
     </div>`;
+  corpo.scrollTop = rolagem;
   if (foco) corpo.querySelector(foco)?.focus();
 }
 function adcAdminDigitou(e) {
@@ -9936,17 +9935,26 @@ document.addEventListener("change", (e) => {
   if (l) _adcEdit.listas.push({ nome: l.nome, max: l.max || null, itens: (l.itens || []).map(a => ({ nome: a.nome, preco: a.preco, max: a.max || 10, ativo: a.ativo !== false })) }); // cópia independente (ids novos)
   adcAdminDesenhar();
 });
-async function adcAdminSalvar(fechar) {
+// "Salvo ✓" que pulsa e some (a cada clique aparece de novo); erro fica parado em vermelho
+window.pulsoAviso = (el, texto, tipo = "ok") => {
+  if (!el) return;
+  el.textContent = texto;
+  el.classList.remove("pulso-salvo", "aviso-erro");
+  if (tipo === "espera") return;
+  void el.offsetWidth; // reinicia a animação mesmo clicando várias vezes
+  el.classList.add(tipo === "erro" ? "aviso-erro" : "pulso-salvo");
+};
+async function adcAdminSalvar() {
   const E = _adcEdit;
   if (!E || E.salvando) return;
   const aviso = document.getElementById("adc-admin-aviso");
   // lista sem nome ou adicional sem nome: avisa em vez de sumir com o que a pessoa digitou
   for (const l of E.listas) {
-    if (!String(l.nome || "").trim()) { aviso.textContent = "Dê um nome para cada lista."; return; }
+    if (!String(l.nome || "").trim()) return pulsoAviso(aviso, "Dê um nome para cada lista.", "erro");
     l.itens = l.itens.filter(a => String(a.nome || "").trim() || String(a.preco || "").trim());
-    if (l.itens.some(a => !String(a.nome || "").trim())) { aviso.textContent = "Tem adicional sem nome."; return; }
+    if (l.itens.some(a => !String(a.nome || "").trim())) return pulsoAviso(aviso, "Tem adicional sem nome.", "erro");
   }
-  E.salvando = true; aviso.textContent = "Salvando...";
+  E.salvando = true; pulsoAviso(aviso, "Salvando...", "espera");
   const rid = getRestaurantId();
   try {
     if (!E.catId) { // categoria que só existia nos itens: cria a linha dela
@@ -9963,13 +9971,11 @@ async function adcAdminSalvar(fechar) {
     const c = cardapioCatsDb.find(x => x.nome === E.cat);
     if (c) c.adicionais = d.adicionais; else cardapioCatsDb.push(d);
     _adcCat.em = 0; // o caixa já vê a mudança no próximo pedido
-    aviso.textContent = "Salvo ✓";
-    if (fechar) { document.getElementById("adc-admin")?.remove(); _adcEdit = null; renderCardapio(true); }
-    else adcAdminDesenhar();
-  } catch (err) { aviso.textContent = err.message; }
+    adcAdminDesenhar();          // salvou: continua aberto, do jeito que estava
+    pulsoAviso(aviso, "Salvo ✓");
+  } catch (err) { pulsoAviso(aviso, err.message, "erro"); }
   finally { if (_adcEdit) _adcEdit.salvando = false; }
 }
-
 // no pedido aberto e na mesa: adicionais e observação embaixo do nome do item
 window.adcLinhasPedido = (it) => {
   const a = (Array.isArray(it?.adicionais) ? it.adicionais : []).map(x => `<small style="display:block; font-size:12px; font-weight:500; color:rgba(252,228,228,0.6);">+ ${escapeHtml(adcTexto(x))}</small>`).join("");
