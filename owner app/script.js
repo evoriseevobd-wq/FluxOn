@@ -410,13 +410,13 @@ if (st.view === "overview") {
   });
 
     // tela → recurso do plano (sem o recurso, aparece o cadeado em vez da tela)
-  const TELA_RECURSO = { custos: "estoque", cuing: "estoque", cuhist: "custos", cufichas: "custos", cudesp: "custos", cuver: "custos", clientes: "clientes", fidelidade: "fidelidade", fidmodelo: "fidelidade", fidpiso: "fidelidade", caixa: "vendas", canais: "canais", operacao: "operacao", previsao: "previsao", func: "vale_funcionario" };
+  const TELA_RECURSO = { custos: "estoque", cuing: "estoque", cuhist: "custos", cufichas: "custos", cudesp: "custos", cuver: "custos", clientes: "clientes", fidelidade: "fidelidade", fidmodelo: "fidelidade", fidpiso: "fidelidade", caixa: "vendas", canais: "canais", operacao: "operacao", previsao: previsao: "previsao" }; // "func" (equipe e PIN) é de todos os planos; só os vales são Executive
   const PAI = { cuing: "custos", cuhist: "cuing", cufichas: "custos", cudesp: "custos", cuver: "custos", fidmodelo: "fidelidade", fidpiso: "fidelidade",
-    dre: "t-dinheiro", custos: "t-dinheiro", canais: "t-dinheiro", caixa: "t-dinheiro", func: "t-dinheiro",
+    dre: "t-dinheiro", custos: "t-dinheiro", canais: "t-dinheiro", caixa: "t-dinheiro", func: "t-dinheiro", reg: "t-dinheiro",
     clientes: "t-clientes", fidelidade: "t-clientes", avaliacoes: "t-clientes",
     operacao: "t-mais", previsao: "t-mais", pdf: "t-mais" };
   const SEM_PERIODO = ["t-clientes", "t-mais", "custos", "cuing", "cuhist", "cufichas", "cudesp", "fidelidade", "fidmodelo", "fidpiso", "func"];
-  const TITULOS = { dre: "Lucro e operação", custos: "Custos e estoque", cuing: "Ingredientes e mercadorias", cuhist: "Histórico de compras", cufichas: "Fichas dos pratos", cudesp: "Despesas", cuver: "Ver meus custos", canais: "Rentabilidade por canal", operacao: "Operação e IA", clientes: "Clientes e origem", fidelidade: "Fidelidade", fidmodelo: "Modelo de fidelidade", fidpiso: "Piso dos prêmios", previsao: "Previsão de demanda", caixa: "Vendas por dia", pdf: "Exportar PDF", avaliacoes: "Avaliações", func: "Funcionários e vales" };
+  const TITULOS = { dre: "Lucro e operação", custos: "Custos e estoque", cuing: "Ingredientes e mercadorias", cuhist: "Histórico de compras", cufichas: "Fichas dos pratos", cudesp: "Despesas", cuver: "Ver meus custos", canais: "Rentabilidade por canal", operacao: "Operação e IA", clientes: "Clientes e origem", "fidelidade", "fidmodelo", "fidpiso", "func", "reg"];, previsao: "Previsão de demanda", caixa: "Vendas por dia", pdf: "Exportar PDF", avaliacoes: "Avaliações", func: "Funcionários e vales" };
   function render() {
     const ov = st.view === "overview";
     const semPer = !ov && SEM_PERIODO.includes(st.screen);
@@ -429,7 +429,7 @@ if (st.view === "overview") {
     $("content").dataset.tela = ov ? "overview" : st.screen;
     if (ov) { $("content").innerHTML = telaOverview(st.ov); animarNumeros(); return; }
     const d = st.dash;
-    const T = { home: telaHome, "t-dinheiro": telaDinheiro, "t-clientes": telaClientesMenu, "t-mais": telaMais, dre: telaDre, custos: telaCustos, canais: telaCanais, operacao: telaOperacao, clientes: telaClientes, fidelidade: telaFidelidade, fidmodelo: telaFidModelo, fidpiso: telaFidPiso, cuing: telaIngredientes, cuhist: telaHistorico, cufichas: telaFichas, cudesp: telaDespesas, cuver: telaVerCustos, previsao: telaPrevisao, caixa: telaCaixa, pdf: telaPdf, avaliacoes: telaAvaliacoes, func: telaFunc }[st.screen];
+    const T = { home: telaHome, "t-dinheiro": telaDinheiro, "t-clientes": telaClientesMenu, "t-mais": telaMais, dre: telaDre, custos: telaCustos, canais: telaCanais, operacao: telaOperacao, clientes: telaClientes, fidelidade: telaFidelidade, fidmodelo: telaFidModelo, fidpiso: telaFidPiso, cuing: telaIngredientes, cuhist: telaHistorico, cufichas: telaFichas, cudesp: telaDespesas, cuver: telaVerCustos, previsao: telaPrevisao, caixa: telaCaixa, pdf: telaPdf, avaliacoes: telaAvaliacoes, func: telaFunc, reg: telaReg }[st.screen];
     const precisa = TELA_RECURSO[st.screen];
     if (precisa && d && d.restaurant && !pode(d, precisa)) { $("content").innerHTML = lockCard(`${TITULOS[st.screen] || "Esta tela"} faz parte do plano ${planoDe(d, precisa)}.`, planoDe(d, precisa)); return; }
     $("content").innerHTML = T(d);
@@ -676,28 +676,31 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
         ${linhaMenu(d, "custos", "box", "Custos e estoque", "Compras, fichas dos pratos e despesas", "estoque")}
         ${linhaMenu(d, "canais", "pie", "Rentabilidade por canal", "Quanto sobra no salão e no delivery", "canais")}
         ${linhaMenu(d, "caixa", "file", "Vendas por dia", "Dia a dia do período e os mais vendidos", "vendas")}
-        ${linhaMenu(d, "func", "users", "Funcionários e vales", "A equipe e quanto cada um consumiu no mês", "vale_funcionario")}
+        ${linhaMenu(d, "func", "users", "Equipe, PIN e vales", "Quem autoriza cancelamento e desconto, e os vales do mês")}
+        ${linhaMenu(d, "reg", "alerta", "Cancelamentos e descontos", "Quem autorizou, quanto e por quê")}
       </ul></section>`;
   }
 
   /* funcionários e vales: o dono cadastra a equipe; o caixa lança o vale no Cobrar; aqui sai o total do mês de cada um
      (salvar não recarrega a tela: só a parte que mudou é redesenhada) */
-  const fv = { mes: "", edit: "", lista: [], vales: null, ocupado: false };
+  const fv = { mes: "", edit: "", pin: "", lista: [], vales: null, ocupado: false, temVale: false };
   const fvBase = () => `/owner/restaurants/${encodeURIComponent(st.view)}/funcionarios`;
   const fvVales = () => api(`/owner/restaurants/${encodeURIComponent(st.view)}/vales?mes=${fv.mes}`);
-  function telaFunc() {
+  function telaFunc(d) {
     if (!fv.mes) fv.mes = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
+    fv.temVale = !d?.restaurant || pode(d, "vale_funcionario");
     const my = ++st.reqId;
-    Promise.all([api(fvBase()), fvVales()]).then(([lista, v]) => {
+    Promise.all([api(fvBase()), fv.temVale ? fvVales() : null]).then(([lista, v]) => {
       if (my !== st.reqId || st.screen !== "func") return;
       fv.lista = Array.isArray(lista) ? lista : [];
       fv.vales = v?.funcionarios ? v : { total: 0, funcionarios: [] };
-      fv.edit = "";
+      fv.edit = ""; fv.pin = "";
       $("content").innerHTML = `<section class="card" id="fv-vales">${htmlVales()}</section><section class="card" id="fv-equipe">${htmlEquipe()}</section>`;
     }).catch((e) => { if (my === st.reqId) $("content").innerHTML = `<div class="card err"><p style="margin:0">${esc(e.message)}</p></div>`; });
     return `<div class="skeleton"></div><div class="skeleton"></div>`;
   }
   function htmlVales() {
+   if (!fv.temVale) return `<h2>Vales do mês</h2><p class="muted" style="margin:6px 0 0">O vale funcionário faz parte do plano Executive.</p>`;
     const v = fv.vales || { total: 0, funcionarios: [] };
     const linhas = v.funcionarios.map((f) => `<div class="split-row"><div class="split-head"><span>${esc(f.nome)}${f.ativo ? "" : " · saiu da equipe"}</span><span>${brl(f.total)}</span></div>
       <div class="muted" style="font-size:12px;display:grid;gap:2px;margin-top:4px">${f.itens.map((i) => `<span style="display:flex;justify-content:space-between"><span>${fmtData(i.data)} · pedido #${esc(i.numero)}</span><span>${brl(i.valor)}</span></span>`).join("")}</div></div>`).join("");
@@ -709,10 +712,15 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
   function htmlEquipe() {
     const itens = fv.lista.map((f) => fv.edit === f.id
       ? `<div class="split-row" style="display:grid;gap:8px"><input id="fv-ed" value="${esc(f.nome)}" maxlength="60" aria-label="Nome"><div style="display:flex;gap:8px"><button class="btn primary" data-fv-salvar="${esc(f.id)}" style="flex:1">Salvar</button><button class="btn" data-fv-cancelar style="flex:1">Cancelar</button></div></div>`
-      : `<div class="split-row"><div class="split-head"><span>${esc(f.nome)}</span><span>${cuBtnIc("data-fv-editar", f.id, "Editar nome", "✎")} ${cuBtnIc("data-fv-tirar", f.id, "Tirar da equipe", "✕")}</span></div></div>`).join("");
+      : fv.pin === f.id
+      ? `<div class="split-row" style="display:grid;gap:8px"><span>${esc(f.nome)}</span><input id="fv-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" placeholder="PIN de 4 a 6 números" aria-label="PIN de ${esc(f.nome)}"><div style="display:flex;gap:8px"><button class="btn primary" data-fv-pin-salvar="${esc(f.id)}" style="flex:1">Salvar PIN</button>${f.tem_pin ? `<button class="btn" data-fv-pin-tirar="${esc(f.id)}" style="flex:1">Tirar PIN</button>` : ""}<button class="btn" data-fv-cancelar style="flex:1">Cancelar</button></div></div>`
+      : `<div class="split-row"><div class="split-head"><span>${esc(f.nome)}${f.tem_pin ? ` <span class="tag">autoriza</span>` : ""}</span><span>${cuBtnIc("data-fv-pin", f.id, f.tem_pin ? "Trocar PIN" : "Dar PIN", "PIN")} ${cuBtnIc("data-fv-editar", f.id, "Editar nome", "✎")} ${cuBtnIc("data-fv-tirar", f.id, "Tirar da equipe", "✕")}</span></div></div>`).join("");
+    const algumPin = fv.lista.some((f) => f.tem_pin);
     return `<h2>Equipe</h2>${itens ? `<div class="split">${itens}</div>` : `<div class="empty">Ninguém cadastrado ainda.</div>`}
       <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-top:12px"><input id="fv-nome" maxlength="60" placeholder="Nome do funcionário" aria-label="Nome do funcionário"><button class="btn primary" id="fv-add">Adicionar</button></div>
-      <p class="foot" style="text-align:left">Só quem está aqui aparece para o caixa escolher no vale funcionário.</p>`;
+      <p class="foot" style="text-align:left">${algumPin
+        ? "Cancelar pedido e dar desconto no total pedem o PIN de quem tem a etiqueta \"autoriza\". Cada PIN é de uma pessoa só: assim você sabe quem autorizou."
+        : "Dê um PIN para quem pode autorizar cancelamento e desconto (você ou o gerente). Sem nenhum PIN, o caixa cancela só com o motivo."}</p>`;
   }
   const fvEquipe = (foco) => { const el = $("fv-equipe"); if (el) el.innerHTML = htmlEquipe(); if (foco) $(foco)?.focus(); };
   const fvOrdenar = () => fv.lista.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -727,7 +735,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
   }
   document.addEventListener("click", (e) => {
     if (st.screen !== "func") return;
-    const t = e.target.closest("[data-fv-editar],[data-fv-tirar],[data-fv-salvar],[data-fv-cancelar],#fv-add");
+    const t = e.target.closest("[data-fv-editar],[data-fv-tirar],[data-fv-salvar],[data-fv-cancelar],[data-fv-pin],[data-fv-pin-salvar],[data-fv-pin-tirar],#fv-add");
     if (!t || fv.ocupado) return;
     if (t.id === "fv-add") {
       const nome = $("fv-nome").value.trim();
@@ -737,8 +745,18 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
         fv.lista.push(novo); fvOrdenar(); fvEquipe("fv-nome");
       }, () => { fvEquipe("fv-nome"); $("fv-nome").value = nome; });
     }
-    if (t.dataset.fvEditar) { fv.edit = t.dataset.fvEditar; return fvEquipe("fv-ed"); }
-    if (t.hasAttribute("data-fv-cancelar")) { fv.edit = ""; return fvEquipe(); }
+    if (t.dataset.fvEditar) { fv.edit = t.dataset.fvEditar; fv.pin = ""; return fvEquipe("fv-ed"); }
+    if (t.hasAttribute("data-fv-cancelar")) { fv.edit = ""; fv.pin = ""; return fvEquipe(); }
+    if (t.dataset.fvPin) { fv.pin = t.dataset.fvPin; fv.edit = ""; return fvEquipe("fv-pin"); }
+    if (t.dataset.fvPinSalvar || t.dataset.fvPinTirar) {
+      const id = t.dataset.fvPinSalvar || t.dataset.fvPinTirar, pin = t.dataset.fvPinSalvar ? $("fv-pin").value.trim() : null;
+      if (pin !== null && !/^\d{4,6}$/.test(pin)) { alert("O PIN tem de 4 a 6 números."); return $("fv-pin").focus(); }
+      return fvAcao(t, async () => {
+        const r = await api(`${fvBase()}/${encodeURIComponent(id)}/pin`, { method: "PATCH", body: JSON.stringify({ pin }) });
+        const f = fv.lista.find((x) => x.id === id); if (f) f.tem_pin = !!r.tem_pin;
+        fv.pin = ""; fvEquipe();
+      });
+    }
     if (t.dataset.fvSalvar) {
       const id = t.dataset.fvSalvar, nome = $("fv-ed").value.trim();
       if (nome.length < 2) return $("fv-ed").focus();
@@ -767,6 +785,38 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
     if (st.screen !== "func" || e.key !== "Enter") return;
     if (e.target.id === "fv-nome") $("fv-add")?.click();
     if (e.target.id === "fv-ed") document.querySelector("[data-fv-salvar]")?.click();
+    if (e.target.id === "fv-pin") document.querySelector("[data-fv-pin-salvar]")?.click();
+  });
+
+  /* cancelamentos e descontos: o registro do caixa (quem autorizou, quanto e por quê), por mês */
+  const rg = { mes: "" };
+  function telaReg() {
+    if (!rg.mes) rg.mes = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
+    const my = ++st.reqId;
+    api(`/owner/restaurants/${encodeURIComponent(st.view)}/auditoria?mes=${rg.mes}`).then((r) => {
+      if (my !== st.reqId || st.screen !== "reg") return;
+      $("content").innerHTML = htmlReg(r);
+    }).catch((e) => { if (my === st.reqId) $("content").innerHTML = `<div class="card err"><p style="margin:0">${esc(e.message)}</p></div>`; });
+    return `<div class="skeleton"></div><div class="skeleton"></div>`;
+  }
+  function htmlReg(r) {
+    const z = r.resumo || {}, quando = (iso) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).replace(",", " às");
+    const linhas = (r.registros || []).map((x) => {
+      const d = x.detalhes || {}, canc = x.acao === "cancelamento";
+      return `<div class="split-row"><div class="split-head"><span>${canc ? "Cancelou" : "Desconto"} · pedido #${esc(x.pedido_numero ?? "—")}</span><span>${brl(x.valor)}</span></div>
+        <div class="muted" style="font-size:12px;display:grid;gap:2px;margin-top:4px">
+          <span>${quando(x.criado_em)} · ${x.funcionario_nome ? `autorizado por ${esc(x.funcionario_nome)}` : "sem PIN"}</span>
+          ${canc ? `<span>Motivo: ${esc(d.motivo || "—")}${d.estorno_pix === "ok" ? " · Pix devolvido ao cliente" : ""}</span>` : `<span>De ${brl(d.de)} para ${brl(d.para)}</span>`}
+        </div></div>`;
+    }).join("");
+    return `<section class="card"><input id="rg-mes" type="month" value="${esc(rg.mes)}" aria-label="Mês">
+      <div class="duas" style="margin-top:12px"><div class="kpi"><span class="label">Cancelados</span><span class="value">${int(z.cancelamentos || 0)}</span><span class="sub">${brl(z.valor_cancelado || 0)}</span></div>
+      <div class="kpi"><span class="label">Descontos</span><span class="value">${int(z.descontos || 0)}</span><span class="sub">${brl(z.valor_descontos || 0)}</span></div></div>
+      ${linhas ? `<div class="split" style="margin-top:12px">${linhas}</div>` : `<div class="empty">Nada neste mês.</div>`}</section>`;
+  }
+  document.addEventListener("change", (e) => {
+    if (st.screen !== "reg" || e.target.id !== "rg-mes" || !e.target.value) return;
+    rg.mes = e.target.value; render();
   });
   
   function telaClientesMenu(d) {
