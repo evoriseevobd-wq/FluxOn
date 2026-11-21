@@ -8950,8 +8950,11 @@ const IA_FORMATO = {
       categoria: { type: "string" },
       etapa: { type: "string", enum: ["perguntar_tipo", "mostrar_categoria", "sugerir_itens", "adicionar", "conversa"] },
       adicionar: { type: "array", items: { type: "object", additionalProperties: false,
-        properties: { nome: { type: "string" }, quantidade: { type: "integer" }, opcao: { type: "string" } },
-        required: ["nome", "quantidade", "opcao"] } },
+        properties: { nome: { type: "string" }, quantidade: { type: "integer" }, opcao: { type: "string" },
+          adicionais: { type: "array", items: { type: "object", additionalProperties: false,
+            properties: { nome: { type: "string" }, quantidade: { type: "integer" } }, required: ["nome", "quantidade"] } },
+          obs: { type: "string" } },
+        required: ["nome", "quantidade", "opcao", "adicionais", "obs"] } },
       pular: { type: "boolean" }
     },
     required: ["resposta", "itens_sugeridos", "opcoes_rapidas", "categoria", "etapa", "adicionar", "pular"]
@@ -8978,14 +8981,20 @@ app.post("/api/v1/ia/sugestao", async (req, res) => {
     iaUso.set(chaveIA, usoIA);
 
     // Busca o cardápio ativo real — a IA só pode sugerir o que existe aqui
-    const [{ data: cardapio, error }, loja] = await Promise.all([
-      supabase.from("cardapio").select("id, nome, descricao, preco, categoria, opcoes, foto_url")
+    const [{ data: cardapio, error }, loja, mapaAdc] = await Promise.all([
+      supabase.from("cardapio").select("id, nome, descricao, preco, categoria, opcoes, foto_url, sem_adicionais")
         .eq("restaurant_id", restaurant_id).eq("ativo", true).order("categoria").order("ordem"),
-      iaContextoLoja(restaurant_id)
+      iaContextoLoja(restaurant_id),
+      adicionaisPorCategoria(restaurant_id).catch(() => new Map())
     ]);
     if (error) return sendError(res, 500, "Erro ao buscar cardápio");
     const itens = await comEtiquetas(restaurant_id, cardapio || []);
-    const cardapioTexto = itens.map(i => iaLinhaItem(i, itens)).join("\n");
+    // ➕ adicionais: as listas de cada item (pela categoria; pausado não entra; "sem adicionais" não tem)
+    const adcDoItem = (i) => i?.sem_adicionais ? [] : adicionaisVisiveis(mapaAdc.get(catChave(i?.categoria)));
+    const cardapioTexto = itens.map(i => iaLinhaItem(i, itens) + (i.sem_adicionais && adicionaisVisiveis(mapaAdc.get(catChave(i.categoria))).length ? " (sem adicionais)" : "")).join("\n");
+    const catsComAdc = [...new Set(itens.map(i => i.categoria || "Geral"))].map(c => [c, adicionaisVisiveis(mapaAdc.get(catChave(c)))]).filter(([, l]) => l.length);
+    const adicionaisTexto = catsComAdc.map(([c, ls]) => `- ${c}: ` + ls.map(l => `${l.nome}${l.max ? ` (até ${l.max} no total)` : ""}: ` +
+      l.itens.map(a => `${a.nome} ${a.preco > 0 ? "+" + iaMoeda(a.preco) : "grátis"}`).join(", ")).join(" | ")).join("\n");
     const contagem = {};
     itens.forEach(i => { const c = i.categoria || "Geral"; contagem[c] = (contagem[c] || 0) + 1; });
     const categoriasTexto = Object.entries(contagem).map(([c, n]) => `- ${c} (${n} ${n === 1 ? "item" : "itens"})`).join("\n");
@@ -9022,6 +9031,12 @@ COMO ATENDER (o mais importante) — conduza a escolha em etapas, como quem ofer
   - Item com tamanhos e a pessoa não disse qual: NÃO adicione; pergunte o tamanho com "opcoes_rapidas" (só os que existem).
   - Item de 2 sabores: não adicione pelo chat; mostre em "itens_sugeridos" pra ela escolher os sabores tocando.
   - Se não der pra saber qual item, pergunte. Nunca adicione o que a pessoa não pediu. Fora dessa etapa, "adicionar" fica vazio.
+    - ADICIONAIS E OBSERVAÇÃO de cada item (veja a lista ADICIONAIS; vale pra todos os itens da categoria, menos os marcados "(sem adicionais)"):
+    · "com X", "mais X", "X extra", "adicional de X": se X está nos ADICIONAIS da categoria do item, vai em "adicionais" do item (nome exato da lista e quantidade). Se X já faz parte do item (está no nome ou na descrição, ex.: "X-Bacon com bacon"), NÃO é adicional.
+    · "sem X", "tira X", "bem passado", "pouco gelo", "molho à parte": é observação; escreva curto em "obs" do item (ex.: "sem cebola"). Nunca vire observação um pedido de "com X".
+    · X que não está nos ADICIONAIS: não invente e não coloque em "obs"; deixe fora e diga que esse adicional não tem.
+    · NÃO pergunte de adicionais por conta própria: o sistema pergunta sozinho antes de colocar no carrinho. Quando a pessoa responder essa pergunta ("bacon", "2 cheddar", "sem adicional", "só isso, pode colocar"), use a etapa "adicionar" de novo com o item, a quantidade, a opção, a "obs" e TODOS os adicionais combinados na conversa.
+    · Sem adicional ou sem observação: "adicionais" vazio e "obs" "".
 - ETAPA "conversa": dúvidas, horário, entrega etc.
 - Com itens no carrinho, ofereça o que combina (bebida, sobremesa, acompanhamento) do mesmo jeito: pergunte antes e ofereça os tipos. Se a pessoa recusar, não insista.
 
@@ -9030,7 +9045,8 @@ EXEMPLOS (categorias Refrigerantes, Sucos, Cervejas e Pizzas):
 - Cliente: "Refrigerantes" → etapa "mostrar_categoria", categoria "Refrigerantes", itens_sugeridos [].
 - Cliente: "tô querendo uma pizza" → etapa "mostrar_categoria", categoria "Pizzas", itens_sugeridos [].
 - Cliente: "quero uma Coca 2L" → etapa "sugerir_itens", itens_sugeridos ["Coca 2L"].
-- (depois de oferecer a Coca 2L) Cliente: "adicione ao meu pedido" → etapa "adicionar", adicionar [{nome "Coca 2L", quantidade 1, opcao ""}], resposta "Pronto! Coloquei 1 Coca 2L no seu pedido 😉".
+- (depois de oferecer a Coca 2L) Cliente: "adicione ao meu pedido" → etapa "adicionar", adicionar [{nome "Coca 2L", quantidade 1, opcao "", adicionais [], obs ""}], resposta "Pronto! Coloquei 1 Coca 2L no seu pedido 😉".
+- Cliente: "quero um X-Burger sem cebola com bacon" (Bacon está nos ADICIONAIS de Lanches) → etapa "adicionar", adicionar [{nome "X-Burger", quantidade 1, opcao "", adicionais [{nome "Bacon", quantidade 1}], obs "sem cebola"}].
 
 REGRAS:
 1. Só fale do que está no CARDÁPIO, com o nome exato. Nunca invente prato, sabor, tamanho, adicional ou preço.
@@ -9053,6 +9069,9 @@ CAMPOS DA RESPOSTA:
 
 CATEGORIAS:
 ${categoriasTexto || "(nenhuma)"}
+
+ADICIONAIS (por categoria):
+${adicionaisTexto || "(nenhum)"}
 
 MAIS PEDIDOS (categorias grandes):
 ${maisPedidosTexto || "(nenhuma categoria grande)"}
@@ -9120,8 +9139,12 @@ MODO CARRINHO (agora): a pessoa abriu o carrinho. Veja se falta um tipo de item 
     // pergunta de tipo nunca vem com item (a pessoa escolhe o tipo primeiro)
     if (parsed.etapa === "perguntar_tipo") itensCompletos = [];
 
-        // "adiciona ao meu pedido": o servidor confere item, opção e preço no cardápio (a IA só diz o quê)
-    const adicionar = [], naoDeu = [];
+    // "adiciona ao meu pedido": o servidor confere item, opção, adicionais e preço no cardápio (a IA só diz o quê)
+    // Item com adicionais: antes de colocar, o SISTEMA pergunta quais (com a lista e os preços) — a IA não decide sozinha.
+    const jaPerguntou = (nome) => hist.filter(m => m.role === "assistant").slice(-3)
+      .some(m => (m.content.match(/\[perguntei adicionais: ([^\]]*)\]/) || [])[1]?.split("|").some(n => iaNorm(n) === iaNorm(nome)));
+    const adicionar = [], naoDeu = [], semAdc = [], outros = []; // outros: o que fica separado esperando a pergunta
+    let pergunta = null;
     for (const a of (parsed.etapa === "adicionar" && Array.isArray(parsed.adicionar) ? parsed.adicionar : []).slice(0, 10)) {
       const item = itens.find(i => iaNorm(i.nome) === iaNorm(a.nome));
       if (!item) continue;
@@ -9129,11 +9152,52 @@ MODO CARRINHO (agora): a pessoa abriu o carrinho. Veja se falta um tipo de item 
       const qty = Math.min(20, Math.max(1, parseInt(a.quantidade) || 1));
       const op = ops.find(o => !o.texto_livre && iaNorm(o.nome) === iaNorm(a.opcao));
       if (ops.some(o => o.texto_livre) || (ops.length && !op)) { naoDeu.push(enxuto(item)); continue; } // 2 sabores ou sem tamanho: a pessoa toca e escolhe
-      adicionar.push(op ? { id: item.id, nome: item.nome, qty, opcao: { id: op.id, nome: op.nome, preco: Number(op.preco) || 0 } }
-        : { id: item.id, nome: item.nome, qty, preco: Number(item.preco) || 0 });
+      // adicionais: só os da lista da categoria (nome exato), com o limite de cada um e o da lista
+      const listas = adcDoItem(item), escolhidos = [];
+      for (const p of (Array.isArray(a.adicionais) ? a.adicionais : []).slice(0, 15)) {
+        let ach = null, lista = null;
+        for (const l of listas) { const x = l.itens.find(t => iaNorm(t.nome) === iaNorm(p?.nome)); if (x) { ach = x; lista = l; break; } }
+        if (!ach) { if (String(p?.nome || "").trim()) semAdc.push(String(p.nome).trim().slice(0, 40)); continue; }
+        const ja = escolhidos.find(e => e.id === ach.id);
+        const q = Math.max(1, parseInt(p.quantidade) || 1);
+        if (ja) ja.qtd += q; else escolhidos.push({ id: ach.id, nome: ach.nome, preco: Number(ach.preco) || 0, qtd: q, max: ach.max || 10, lista });
+      }
+      let estourou = null;
+      for (const e of escolhidos) if (e.qtd > e.max) { estourou = `${e.nome}: no máximo ${e.max}`; e.qtd = e.max; }
+      for (const l of listas) {
+        const soma = escolhidos.filter(e => e.lista === l).reduce((t, e) => t + e.qtd, 0);
+        if (l.max && soma > l.max) { estourou = `Em ${l.nome} dá pra escolher até ${l.max}`; escolhidos.splice(0, escolhidos.length, ...escolhidos.filter(e => e.lista !== l)); }
+      }
+      const adc = escolhidos.map(({ id, nome, preco, qtd }) => ({ id, nome, preco, qtd }));
+      const obs = String(a.obs || "").replace(/\s+/g, " ").trim().slice(0, 140);
+      if (listas.length && (!jaPerguntou(item.nome) || estourou)) { // ainda não perguntou (ou passou do limite): pergunta antes de colocar
+        if (!pergunta) pergunta = { item, qty, op, adc, obs, listas, estourou };
+        else outros.push(`${qty}x ${item.nome}`);
+        continue;
+      }
+      const base = op ? { id: item.id, nome: item.nome, qty, opcao: { id: op.id, nome: op.nome, preco: Number(op.preco) || 0 } }
+        : { id: item.id, nome: item.nome, qty, preco: Number(item.preco) || 0 };
+      adicionar.push({ ...base, ...(adc.length ? { adicionais: adc } : {}), ...(obs ? { obs } : {}) });
+      outros.push(`${qty}x ${item.nome}${op ? " " + op.nome : ""}`);
+    }
+    let perguntouAdicionais = [];
+    if (pergunta) {
+      // nada entra enquanto tiver item esperando a resposta dos adicionais (senão entraria duas vezes)
+      adicionar.length = 0;
+      const { item, qty, op, adc, obs, listas, estourou } = pergunta;
+      const nomeItem = `${qty > 1 ? qty + "x " : ""}${item.nome}${op ? " " + op.nome : ""}`;
+      const anotado = adc.length || obs ? `Anotei: ${nomeItem}${adc.map(x => ` + ${x.qtd > 1 ? x.qtd + "x " : ""}${x.nome}`).join("")}${obs ? ` (${obs})` : ""}. ` : "";
+      const lista = listas.map(l => `${l.nome}${l.max ? ` (até ${l.max})` : ""}: ${l.itens.map(t => `${t.nome}${t.preco > 0 ? " +" + iaMoeda(t.preco) : ""}`).join(", ")}`).join(" · ");
+      parsed.resposta = `${outros.length ? `Separei: ${outros.join(", ")}. ` : ""}${semAdc.length ? `Não temos ${semAdc.join(", ")} como adicional. ` : ""}${estourou ? estourou + ". " : ""}${anotado}Quer ${adc.length ? "mais algum" : "algum"} adicional${adc.length || obs ? "" : ` no ${item.nome}`}? ${lista}`;
+      parsed.opcoes_rapidas = [adc.length ? "Só isso, pode colocar" : "Sem adicional",
+        ...listas.flatMap(l => l.itens).filter(t => !adc.some(x => x.id === t.id)).slice(0, 3).map(t => t.nome)];
+      perguntouAdicionais = [item.nome];
+      itensCompletos = [];
+    } else if (semAdc.length && adicionar.length) {
+      parsed.resposta = `${parsed.resposta} (Não temos ${semAdc.join(", ")} como adicional.)`;
     }
     if (naoDeu.length) itensCompletos = [...itensCompletos.filter(i => !naoDeu.some(n => n.id === i.id)), ...naoDeu];
-    if (parsed.etapa === "adicionar" && !adicionar.length) // nada entrou: não deixa a IA dizer que colocou
+    if (parsed.etapa === "adicionar" && !adicionar.length && !pergunta) // nada entrou: não deixa a IA dizer que colocou
       parsed.resposta = naoDeu.length ? "Esse aqui tem opções pra escolher: toca nele que eu já deixo separado 🙂" : "Não achei esse item no cardápio. Me diz de novo qual você quer?";
     const opcoesRapidas = (Array.isArray(parsed.opcoes_rapidas) ? parsed.opcoes_rapidas : [])
       .map(o => String(o).slice(0, 30)).filter(Boolean).slice(0, 4);
@@ -9144,6 +9208,7 @@ MODO CARRINHO (agora): a pessoa abriu o carrinho. Veja se falta um tipo de item 
       opcoes_rapidas: opcoesRapidas,
       categoria,
       adicionar,
+    perguntou_adicionais: perguntouAdicionais,
       pular: modoCarrinho && (parsed.pular === true || !String(parsed.resposta || "").trim())
     });
 
