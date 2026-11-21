@@ -410,13 +410,13 @@ if (st.view === "overview") {
   });
 
     // tela → recurso do plano (sem o recurso, aparece o cadeado em vez da tela)
-  const TELA_RECURSO = { custos: "estoque", cuing: "estoque", cuhist: "custos", cufichas: "custos", cudesp: "custos", cuver: "custos", clientes: "clientes", fidelidade: "fidelidade", fidmodelo: "fidelidade", fidpiso: "fidelidade", caixa: "vendas", canais: "canais", operacao: "operacao", previsao: previsao: "previsao" }; // "func" (equipe e PIN) é de todos os planos; só os vales são Executive
+  const TELA_RECURSO = { custos: "estoque", cuing: "estoque", cuhist: "custos", cufichas: "custos", cudesp: "custos", cuver: "custos", clientes: "clientes", fidelidade: "fidelidade", fidmodelo: "fidelidade", fidpiso: "fidelidade", caixa: "vendas", canais: "canais", operacao: "operacao", previsao: "previsao" }; // "func" (equipe e PIN) é de todos os planos; só os vales são Executive
   const PAI = { cuing: "custos", cuhist: "cuing", cufichas: "custos", cudesp: "custos", cuver: "custos", fidmodelo: "fidelidade", fidpiso: "fidelidade",
     dre: "t-dinheiro", custos: "t-dinheiro", canais: "t-dinheiro", caixa: "t-dinheiro", func: "t-dinheiro", reg: "t-dinheiro",
     clientes: "t-clientes", fidelidade: "t-clientes", avaliacoes: "t-clientes",
     operacao: "t-mais", previsao: "t-mais", pdf: "t-mais" };
-  const SEM_PERIODO = ["t-clientes", "t-mais", "custos", "cuing", "cuhist", "cufichas", "cudesp", "fidelidade", "fidmodelo", "fidpiso", "func"];
-  const TITULOS = { dre: "Lucro e operação", custos: "Custos e estoque", cuing: "Ingredientes e mercadorias", cuhist: "Histórico de compras", cufichas: "Fichas dos pratos", cudesp: "Despesas", cuver: "Ver meus custos", canais: "Rentabilidade por canal", operacao: "Operação e IA", clientes: "Clientes e origem", "fidelidade", "fidmodelo", "fidpiso", "func", "reg"];, previsao: "Previsão de demanda", caixa: "Vendas por dia", pdf: "Exportar PDF", avaliacoes: "Avaliações", func: "Funcionários e vales" };
+   const SEM_PERIODO = ["t-clientes", "t-mais", "custos", "cuing", "cuhist", "cufichas", "cudesp", "fidelidade", "fidmodelo", "fidpiso", "func", "reg"];
+  const TITULOS = { dre: "Lucro e operação", custos: "Custos e estoque", cuing: "Ingredientes e mercadorias", cuhist: "Histórico de compras", cufichas: "Fichas dos pratos", cudesp: "Despesas", cuver: "Ver meus custos", canais: "Rentabilidade por canal", operacao: "Operação e IA", clientes: "Clientes e origem", fidelidade: "Fidelidade", fidmodelo: "Modelo de fidelidade", fidpiso: "Piso dos prêmios", previsao: "Previsão de demanda", caixa: "Vendas por dia", pdf: "Exportar PDF", avaliacoes: "Avaliações", func: "Equipe, PIN e vales", reg: "Cancelamentos e descontos" };
   function render() {
     const ov = st.view === "overview";
     const semPer = !ov && SEM_PERIODO.includes(st.screen);
