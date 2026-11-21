@@ -819,6 +819,7 @@ input:focus, textarea:focus, select:focus {
     <div class="crm-title">Cardápio</div>
     <div class="cd-topo">
       <input id="cardapio-busca" class="cd-busca" type="search" placeholder="Buscar item" oninput="cardapioBuscar(this.value)">
+      <button class="ghost-button" id="btn-adicionais-cardapio" onclick="abrirAdicionaisCategoria()" title="Adicionais da categoria aberta">Adicionais</button>
       <button class="primary-button" id="btn-novo-item-cardapio">Novo item</button>
     </div>
   </div>
@@ -1562,8 +1563,8 @@ padding:0;
 </div>
 
         <div class="np-campo">
-  <span class="np-rotulo">Observações</span>
-  <textarea id="new-notes" class="np-input" rows="2" placeholder="Sem cebola, bebida sem gelo"></textarea>
+  <span class="np-rotulo">Observação do pedido</span>
+  <textarea id="new-notes" class="np-input" rows="2" placeholder="Ex.: troco pra 100, interfone quebrado, entregar depois das 21h30"></textarea>
 </div>
 
         <div class="modal-actions" style="align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between;">
@@ -1698,7 +1699,7 @@ padding:0;
     </div>
   </div>
 
-  <script src="script.js?v=3"></script>
+  <script src="script.js?v=4"></script>
   <script src="entregadores.js"></script>
   <script src="configuracoes.js"></script>
   <script src="rodizio.js"></script>
