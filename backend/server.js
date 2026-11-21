@@ -501,7 +501,7 @@ app.use("/owner/restaurants/:restaurant_id/custos/insumos", exigePlano("estoque"
 app.use(["compras", "imposto", "despesas", "pratos"].map(p => `/owner/restaurants/:restaurant_id/custos/${p}`), exigePlano("custos"));
 app.use("/owner/restaurants/:restaurant_id/financeiro", exigePlano("custos"));
 app.use("/api/v1/funcionarios/:restaurant_id", requireAuth, exigePlano("vale_funcionario"));
-app.use(["/owner/restaurants/:restaurant_id/vales", "/owner/restaurants/:restaurant_id/funcionarios"], exigePlano("vale_funcionario"));
+app.use("/owner/restaurants/:restaurant_id/vales", exigePlano("vale_funcionario")); // equipe e PIN: todos os planos; vales: Executive
 // cardápio mudou (item, preço, opção, pausa, categoria, importação): o cache do pedido por ID se renova na hora
 app.use(["/api/v1/cardapio", "/api/v1/categorias", "/admin/restaurants/:id/cardapio"], (req, res, next) => {
   if (req.method !== "GET") res.on("finish", () => _cardapioCache.clear());
@@ -2576,7 +2576,7 @@ app.patch("/api/v1/pedidos/:id/adicionar-itens", requireRowOwner("orders"), asyn
       const m = await montarItensPorId(pedidoAtual.restaurant_id, itens_novos, { precoLivre: readAuth(req)?.kind === "user" });
       if (m.erro) return sendError(res, 400, m.erro);
       itens_novos = m.itens; totalPorId = m.total;
-    } else if (itens_novos.some(i => i && i.item_id != null)) return sendError(res, 400, "Itens em formatos diferentes no mesmo pedido");
+    } else return sendError(res, 400, "Esse aplicativo está desatualizado: atualize a página e monte o pedido de novo."); // só por id (o formato antigo, por nome, foi desligado)
 
     // cliente pela mesa (QR, sem login): o servidor confere conta aberta, item pausado e preço
     let adicional = totalPorId ?? parseFloat(total_adicional || 0);
@@ -2763,7 +2763,17 @@ app.patch("/orders/:id/status", requireRowOwner("orders"), async (req, res) => {
 
 // ✅ Busca ANTES do update para saber o estado original
 const { data: orderAntes } = await supabase
-  .from("orders").select("preparing_at, restaurant_id, status, origin, client_phone, total_price, notes, taxa_entrega").eq("id", id).single();
+  .from("orders").select("preparing_at, restaurant_id, status, origin, client_phone, total_price, notes, taxa_entrega, order_number").eq("id", id).single();
+    // ❌ cancelar (pela equipe): motivo obrigatório e, se o dono cadastrou PIN, o PIN de quem autoriza
+    const cancelando = ["cancelled", "canceled"].includes(status) && orderAntes && !["cancelled", "canceled"].includes(orderAntes.status);
+    let autCancel = null, motivoCancel = null;
+    if (cancelando && readAuth(req)?.kind === "user") {
+      motivoCancel = String(req.body?.motivo || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      if (motivoCancel.length < 3) return res.status(400).json({ error: "Escreva o motivo do cancelamento", codigo: "MOTIVO" });
+      const a = await autorizar(req, orderAntes.restaurant_id);
+      if (a.erro) return res.status(a.status).json({ error: a.erro, codigo: a.codigo });
+      autCancel = a;
+    }
     
     const now = new Date().toISOString();
     
@@ -2786,6 +2796,7 @@ const { data: orderAntes } = await supabase
      updateData.pagamento_parcial = null;
     } else if (status === "cancelled" || status === "canceled") {
       updateData.cancelled_at = now;
+     if (motivoCancel) { updateData.motivo_cancelamento = motivoCancel; updateData.cancelado_por = autCancel?.funcionario?.nome || "Caixa"; }
     }
     
     const { data, error } = await supabase
@@ -2813,6 +2824,8 @@ const { data: orderAntes } = await supabase
         estornoPix = est.motivo; // pago no Pix, mas a devolução falhou: o restaurante devolve na mão
         console.error(`❌ estorno Pix do pedido ${id}: ${est.motivo}`);
       }
+            if (motivoCancel) registrarAuditoria(data.restaurant_id, autCancel?.funcionario, "cancelamento", data,
+        Number(orderAntes.total_price) || 0, { motivo: motivoCancel, status_antes: orderAntes.status, estorno_pix: estornoPix });
       if (orderAntes.status === "scheduled") {
         io.to(data.restaurant_id).emit("agendamentos_atualizados");
         return res.json({ ...data, estorno: estornoPix || "sem Pix" });
@@ -2936,12 +2949,14 @@ app.post("/api/v1/pedidos", async (req, res) => {
     }
     // 🆔 formato novo: itens por ID (nome e preço saem do cardápio, nunca do aparelho)
     let totalPorId = null;
-    const doCaixa = readAuth(req)?.kind === "user"; // caixa logado (Operacional)
+  const doCaixa = readAuth(req)?.kind === "user"; // caixa logado (Operacional)
+    // cancelar é só pelo botão de cancelar (motivo e PIN): editar o pedido não cancela
+    if (order_id && ["cancelled", "canceled"].includes(String(status || ""))) return sendError(res, 400, "Para cancelar, use o botão Cancelar do pedido");
     if (normalizedItems.length && normalizedItems.every(i => i && i.item_id != null)) {
       const m = await montarItensPorId(restaurant_id, normalizedItems, { precoLivre: doCaixa });
       if (m.erro) return sendError(res, 400, m.erro);
       normalizedItems = m.itens; totalPorId = m.total;
-    } else if (normalizedItems.some(i => i && i.item_id != null)) return sendError(res, 400, "Itens em formatos diferentes no mesmo pedido");
+    } else if (normalizedItems.length) return sendError(res, 400, "Esse aplicativo está desatualizado: atualize a página e monte o pedido de novo."); // só por id (o formato antigo, por nome, foi desligado)
 
     // 💰 Pedido público (sem login nem chave): o servidor confere o total pelo cardápio
     let total_price = total_price_cliente;
@@ -3012,6 +3027,13 @@ app.post("/api/v1/pedidos", async (req, res) => {
     // por ID: o total é o do servidor; só o caixa logado pode mudar o total (desconto/ajuste no balcão)
     if (totalPorId !== null) total_price = doCaixa && total_price_cliente != null && total_price_cliente !== "" && Number(total_price_cliente) > 0
       ? Number(total_price_cliente) : totalPorId;
+          // desconto no total (caixa cobrou menos que o cardápio): com PIN de quem autoriza, e fica registrado
+    let descontoAut = null;
+    if (totalPorId !== null && doCaixa && Number(total_price) < totalPorId - 0.009) {
+      const a = await autorizar(req, restaurant_id);
+      if (a.erro) return res.status(a.status).json({ error: a.erro, codigo: a.codigo });
+      descontoAut = { funcionario: a.funcionario, valor: _r2(totalPorId - Number(total_price)), de: totalPorId, para: _r2(Number(total_price)) };
+    }
     else if (publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
       const { total: totalServidor, naoEncontrados, divergentes } = await calcularTotalServidor(restaurant_id, normalizedItems);
       const diverge = Math.abs(totalServidor - (parseFloat(total_price_cliente) || 0)) > 0.01;
@@ -3117,6 +3139,8 @@ const nextNumber = numData || 1;
   resultData = data;
 }
 
+    if (descontoAut && resultData?.id) registrarAuditoria(restaurant_id, descontoAut.funcionario, "desconto", resultData,
+      descontoAut.valor, { de: descontoAut.de, para: descontoAut.para, edicao: !!order_id });
     // 🛵 grava a taxa de entrega no pedido (delivery do cardápio)
     if (comTaxa && resultData?.id) {
       const { error: errTaxa } = await supabase.from("orders").update({ taxa_entrega, agendado_para }).eq("id", resultData.id);
@@ -10552,16 +10576,51 @@ async function funcNomeEmUso(rid, nome, menosId) {
   return !!data?.length;
 }
 
-// cadastro (Owner e Admin) e lista (o caixa só lê, na hora de cobrar)
-async function funcListar(rid) {
-  const { data, error } = await supabase.from("funcionarios").select("id, nome")
+// cadastro (Owner e Admin) e lista (o caixa só lê, na hora de cobrar); completo = com "tem PIN" (nunca o PIN)
+async function funcListar(rid, completo = false) {
+  const { data, error } = await supabase.from("funcionarios").select(completo ? "id, nome, pin_hash" : "id, nome")
     .eq("restaurant_id", rid).eq("ativo", true).order("nome");
   if (error) throw error;
-  return data || [];
+  return (data || []).map(({ pin_hash, ...f }) => (completo ? { ...f, tem_pin: !!pin_hash } : f));
+}
+
+/* ========================================
+   🔐 PIN DE AUTORIZAÇÃO + REGISTRO DO CAIXA
+   O dono dá um PIN (4 a 6 números) pra quem pode autorizar (gerente, ele mesmo).
+   Com pelo menos um PIN cadastrado, cancelar e dar desconto no total pedem o PIN; sem nenhum, só o motivo.
+   Tudo fica em "auditoria": quem autorizou, o quê, quanto e por quê (o dono vê no Owner).
+======================================== */
+const pinHash = (rid, pin) => crypto.createHmac("sha256", `${process.env.JWT_SECRET}:pin`).update(`${rid}:${pin}`).digest("hex");
+const pinValido = (v) => /^\d{4,6}$/.test(String(v || ""));
+const _pinErros = new Map(); // restaurante → { n, desde } (5 erros em 5 min trava)
+async function autorizar(req, rid) {
+  const { data } = await supabase.from("funcionarios").select("id, nome, pin_hash")
+    .eq("restaurant_id", rid).eq("ativo", true).not("pin_hash", "is", null);
+  const comPin = (data || []).filter(f => f.pin_hash);
+  if (!comPin.length) return { funcionario: null };          // o dono não ligou o PIN: segue só com o motivo
+  const pin = String(req.body?.pin || "");
+  if (!pin) return { erro: "Peça o PIN de quem autoriza", codigo: "PIN", status: 403 };
+  const e = _pinErros.get(String(rid));
+  if (e && Date.now() - e.desde < 5 * 60000 && e.n >= 5) return { erro: "Muitos PINs errados. Espere 5 minutos.", codigo: "PIN", status: 429 };
+  const f = pinValido(pin) && comPin.find(x => x.pin_hash === pinHash(rid, pin));
+  if (!f) {
+    const v = e && Date.now() - e.desde < 5 * 60000 ? e : { n: 0, desde: Date.now() };
+    v.n++; _pinErros.set(String(rid), v);
+    return { erro: "PIN incorreto", codigo: "PIN", status: 403 };
+  }
+  _pinErros.delete(String(rid));
+  return { funcionario: { id: f.id, nome: f.nome } };
+}
+function registrarAuditoria(rid, funcionario, acao, pedido, valor, detalhes) {
+  supabase.from("auditoria").insert([{
+    restaurant_id: String(rid), funcionario_id: funcionario?.id ? String(funcionario.id) : null, funcionario_nome: funcionario?.nome || null,
+    acao, pedido_id: pedido?.id ? String(pedido.id) : null, pedido_numero: pedido?.order_number ?? null,
+    valor: Number(valor) || 0, detalhes: detalhes || {}
+  }]).then(({ error }) => { if (error) console.error("⚠️ auditoria não gravada:", error.message); });
 }
 const funcRotas = (base, guardas, ridDe) => {
   app.get(base, ...guardas, async (req, res) => {
-    try { return res.json(await funcListar(ridDe(req))); }
+    try { return res.json(await funcListar(ridDe(req), true)); }
     catch (err) { return sendError(res, 500, "Erro ao carregar os funcionários"); }
   });
   app.post(base, ...guardas, async (req, res) => {
@@ -10588,10 +10647,29 @@ const funcRotas = (base, guardas, ridDe) => {
       return res.json(data);
     } catch (err) { return sendError(res, 500, "Erro ao salvar o funcionário"); }
   });
+
+    // PIN de autorização: { pin: "1234" } define/troca, { pin: null } tira
+  app.patch(`${base}/:func_id/pin`, ...guardas, async (req, res) => {
+    try {
+      const rid = ridDe(req), pin = req.body?.pin;
+      if (pin !== null && !pinValido(pin)) return sendError(res, 400, "O PIN tem de 4 a 6 números");
+      if (pin !== null) {
+        const { data: igual } = await supabase.from("funcionarios").select("id").eq("restaurant_id", rid).eq("ativo", true)
+          .eq("pin_hash", pinHash(rid, pin)).neq("id", req.params.func_id).limit(1);
+        if (igual?.length) return sendError(res, 409, "Esse PIN já é de outra pessoa da equipe. Escolha outro.");
+      }
+      const { data, error } = await supabase.from("funcionarios").update({ pin_hash: pin === null ? null : pinHash(rid, pin) })
+        .eq("id", req.params.func_id).eq("restaurant_id", rid).eq("ativo", true).select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) return sendError(res, 404, "Funcionário não encontrado");
+      return res.json({ success: true, tem_pin: pin !== null });
+    } catch (err) { return sendError(res, 500, "Erro ao salvar o PIN"); }
+  });
+  
   // remover: sai da lista, mas os vales que ele já usou continuam no histórico do Owner
   app.delete(`${base}/:func_id`, ...guardas, async (req, res) => {
     try {
-      const { data, error } = await supabase.from("funcionarios").update({ ativo: false })
+      const { data, error } = await supabase.from("funcionarios").update({ ativo: false, pin_hash: null })
         .eq("id", req.params.func_id).eq("restaurant_id", ridDe(req)).select("id");
       if (error) throw error;
       if (!data?.length) return sendError(res, 404, "Funcionário não encontrado");
@@ -10606,6 +10684,29 @@ app.get("/api/v1/funcionarios/:restaurant_id", async (req, res) => {
 });
 funcRotas("/owner/restaurants/:restaurant_id/funcionarios", donoRota, (req) => req.params.restaurant_id);
 funcRotas("/admin/restaurants/:id/funcionarios", [requireAdmin], (req) => req.params.id);
+
+
+// Owner: registro do caixa no mês (cancelamentos e descontos: quem autorizou, quanto e por quê)
+app.get("/owner/restaurants/:restaurant_id/auditoria", donoRota, async (req, res) => {
+  try {
+    const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.mes || "")) ? req.query.mes
+      : new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7);
+    const [y, m] = mes.split("-").map(Number);
+    const { data, error } = await supabase.from("auditoria")
+      .select("id, acao, funcionario_nome, pedido_numero, valor, detalhes, criado_em")
+      .eq("restaurant_id", String(req.params.restaurant_id))
+      .gte("criado_em", new Date(Date.UTC(y, m - 1, 1, 3)).toISOString()).lt("criado_em", new Date(Date.UTC(y, m, 1, 3)).toISOString())
+      .order("criado_em", { ascending: false }).limit(1000);
+    if (error) throw error;
+    const lista = data || [];
+    const soma = (a) => _r2(lista.filter(x => x.acao === a).reduce((t, x) => t + (Number(x.valor) || 0), 0));
+    return res.json({ mes, registros: lista,
+      resumo: { cancelamentos: lista.filter(x => x.acao === "cancelamento").length, valor_cancelado: soma("cancelamento"),
+        descontos: lista.filter(x => x.acao === "desconto").length, valor_descontos: soma("desconto") } });
+  } catch (err) {
+    return sendError(res, 500, "Erro ao carregar o registro do caixa");
+  }
+});
 
 // Owner: quanto cada funcionário consumiu no mês (só a parte paga com vale funcionário)
 app.get("/owner/restaurants/:restaurant_id/vales", donoRota, async (req, res) => {
