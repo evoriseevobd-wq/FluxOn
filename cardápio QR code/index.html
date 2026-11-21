@@ -1339,8 +1339,16 @@ async function submitOrder() {
               <span class="qr-adc-qtd"><button type="button" data-adc-menos="${escHtml(a.id)}" ${n ? '' : 'disabled'} aria-label="Menos ${escHtml(a.nome)}">−</button><b>${n}</b><button type="button" data-adc-mais="${escHtml(a.id)}" ${n >= (a.max || 10) || (l.max && naLista >= l.max) ? 'disabled' : ''} aria-label="Mais ${escHtml(a.nome)}">+</button></span>
             </div>`; }).join('')}</div>`;
       }).join('');
-      const extra = somaAdc(adcEscolhidos()), btn = document.getElementById('btn-adicionar-modal');
-      if (btn) btn.textContent = extra > 0 ? `+ Adicionar · + ${formatCurrency(extra)}` : '+ Adicionar ao carrinho';
+      qrPrecoModal();
+    }
+    // preço do popup = item (ou a opção/sabor escolhido) + adicionais; o botão mostra o total
+    function qrPrecoModal(base) {
+      if (base !== undefined) window._qrBase = parseFloat(base) || 0;
+      const total = (window._qrBase || 0) + somaAdc(adcEscolhidos());
+      const el = document.getElementById('modal-preco');
+      if (el) el.textContent = formatCurrency(total);
+      const btn = document.getElementById('btn-adicionar-modal');
+      if (btn && (window._adcListas || []).length) btn.textContent = total > 0 ? `+ Adicionar · ${formatCurrency(total)}` : '+ Adicionar ao carrinho';
     }
     document.addEventListener('click', (e) => {
       const b = e.target.closest('#qr-adc [data-adc-mais], #qr-adc [data-adc-menos]');
@@ -1434,7 +1442,7 @@ function openItemDetailModal(item) {
   modal.style.cssText = `
     position:fixed; inset:0; background:rgba(26,24,20,0.6);
     display:flex; align-items:center; justify-content:center;
-    z-index:800; backdrop-filter:blur(4px); padding:24px;
+    z-index:800; backdrop-filter:blur(4px); padding:12px;
   `;
 
   function getPrecoAtual() {
@@ -1445,7 +1453,7 @@ function openItemDetailModal(item) {
     return `
       <div style="
         background:var(--white); border-radius:24px;
-        width:calc(100% - 48px); max-width:500px; max-height:90vh;
+        width:100%; max-width:600px; max-height:92vh;
         overflow-y:auto;
         animation:slideUp 0.3s ease;
       ">
@@ -1551,7 +1559,7 @@ function openItemDetailModal(item) {
 
   
   modal.innerHTML = buildModal();
-  window._adcQtd = new Map(); window._adcListas = adcDoItem(item);
+  window._adcQtd = new Map(); window._adcListas = adcDoItem(item); window._qrBase = parseFloat(getPrecoAtual()) || 0;
   setTimeout(qrMontarAdc, 0);
   window._carrosselIndex = 0;
   window._selectedOpcaoIdx = 0;
@@ -1583,7 +1591,7 @@ function getFotos(item) {
   const op = opcoes[idx];
 
   // Atualiza preço
-  document.getElementById('modal-preco').textContent = formatCurrency(op.preco);
+  qrPrecoModal(op.preco);
 
   // Atualiza pills
   opcoes.forEach((_, i) => {
@@ -1665,7 +1673,7 @@ const itemAtual = cardapioItems.find(x => x.id === window._currentItemId);
 if (op.texto_livre && (!op.preco || op.preco === 0)) {
   if (marcados.length === 0) {
     // Sem seleção — preço base
-    if (precoEl) precoEl.textContent = formatCurrency(itemAtual?.preco || 0);
+    qrPrecoModal(itemAtual?.preco || 0);
   } else {
     // 1 ou 2 selecionados — maior preço entre os selecionados
     const sabores = marcados.map(c => c.value);
@@ -1683,7 +1691,7 @@ if (op.texto_livre && (!op.preco || op.preco === 0)) {
       }
       return parseFloat(itemEncontrado.preco) || 0;
     });
-    if (precoEl) precoEl.textContent = formatCurrency(Math.max(...precos));
+    qrPrecoModal(Math.max(...precos));
   }
 }
 }
