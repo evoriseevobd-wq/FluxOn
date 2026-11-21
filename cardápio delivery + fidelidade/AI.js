@@ -1,3 +1,6 @@
+
+// item com adicionais: a sugestão da IA abre o popup do item (senão o popup abriria atrás do chat)
+const temAdicionaisIA = (id) => { const it = MENU.find(i => String(i.id) === String(id)); return !!it && typeof adicionaisDoItem === "function" && adicionaisDoItem(it).length > 0; };
 /* ============================================================
    AI CHAT — conectado em POST /api/v1/ia/sugestao
    ============================================================ */
@@ -102,7 +105,7 @@ function appendSuggestedItems(itens){
 
   wrap.querySelectorAll("[data-ai-add]").forEach(btn => {
     btn.addEventListener("click", e => {
-      if(btn.dataset.aiOpcoes === "1"){ closeAiChat(); openItemDetail(btn.dataset.aiAdd); window._voltarChat = btn; return; }
+      if(btn.dataset.aiOpcoes === "1" || temAdicionaisIA(btn.dataset.aiAdd)){ closeAiChat(); openItemDetail(btn.dataset.aiAdd); window._voltarChat = btn; return; }
       addToCart(btn.dataset.aiAdd, e);
       btn.disabled = true;
       btn.innerHTML = `<span>✓ Adicionado ao carrinho</span>`;
@@ -171,7 +174,7 @@ function balaoDesenhar(balao, data){
     ${(data.opcoes_rapidas || []).length ? `<div class="ai-cart-balao-ops">${data.opcoes_rapidas.map(o => `<button type="button">${escHtml(o)}</button>`).join("")}</div>` : ""}`;
   balao.querySelector(".ai-cart-balao-x").onclick = () => balao.remove();
   balao.querySelectorAll(".ai-suggested-item").forEach(b => b.onclick = (e) => {
-    if(b.dataset.op === "1"){ openItemDetail(b.dataset.id); return; }
+    if(b.dataset.op === "1" || temAdicionaisIA(b.dataset.id)){ openItemDetail(b.dataset.id); return; }
     addToCart(b.dataset.id, e);
     b.disabled = true; b.innerHTML = "<span>✓ Adicionado</span>";
   });
