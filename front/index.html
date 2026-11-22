@@ -842,11 +842,10 @@ input:focus, textarea:focus, select:focus {
 
   <!-- HEADER COM 3 PONTINHOS -->
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
-    <div style="display:flex; gap:12px; align-items:center;">
-      <label style="color:rgba(252,228,228,0.8); font-size:14px;">Quantidade de mesas:</label>
-      <input type="number" id="input-mesas" min="1" max="100" value="10"
-        style="width:80px; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.14); background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:14px; outline:none;" />
-      <button class="primary-button" id="btn-gerar-qr">Gerar QR Codes</button>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <span id="qr-total-mesas" style="color:rgba(252,228,228,0.9); font-size:15px; font-weight:800; margin-right:4px;">—</span>
+      <button class="primary-button" type="button" onclick="abrirAdicionarMesas()">Adicionar mesas</button>
+      <button class="ghost-button" type="button" onclick="removerUltimaMesa()">Remover última mesa</button>
     </div>
 
     <!-- BOTÃO 3 PONTINHOS -->
@@ -884,7 +883,7 @@ input:focus, textarea:focus, select:focus {
           style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.14); background:rgba(28,28,30,0.6); color:rgba(252,228,228,1); font-size:13px; outline:none; font-family:inherit;"
         />
         <small style="color:rgba(252,228,228,0.35); font-size:11px; margin-top:6px; display:block; line-height:1.5;">
-          QR vai apontar para:<br/>https://[domínio]?mesa=1
+          Cada mesa aponta para:<br/>https://[domínio]/?m=código-da-mesa
         </small>
         <button onclick="salvarDominio()" style="
           margin-top:12px; width:100%; padding:8px;
@@ -893,6 +892,9 @@ input:focus, textarea:focus, select:focus {
           color:#000; font-weight:700; font-size:13px;
           cursor:pointer; font-family:inherit;
         ">Salvar</button>
+                <div style="height:1px; background:rgba(255,255,255,0.08); margin:14px 0 12px;"></div>
+        <button type="button" onclick="trocarTodosQr()" style="width:100%; padding:8px; border-radius:8px; border:1px solid rgba(239,68,68,0.45); background:transparent; color:rgba(248,113,113,0.95); font-weight:700; font-size:12.5px; cursor:pointer; font-family:inherit;">Gerar QRs novos de todas as mesas</button>
+        <small style="color:rgba(252,228,228,0.35); font-size:11px; margin-top:6px; display:block; line-height:1.5;">Só se um QR vazou: os impressos param de funcionar.</small>
       </div>
     </div>
   </div>
@@ -1699,7 +1701,8 @@ padding:0;
     </div>
   </div>
 
-  <script src="script.js?v=5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="script.js?v=6"></script>
   <script src="entregadores.js"></script>
   <script src="configuracoes.js"></script>
   <script src="rodizio.js"></script>
