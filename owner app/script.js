@@ -182,8 +182,7 @@
     $("form-solicitar").classList.remove("hidden"); $("form-verificar").classList.add("hidden");
     setMsg("");
   }
-  $("in-cpf").addEventListener("input", (e) => { e.target.value = maskCpf(e.target.value); });
-  $("in-tel").addEventListener("input", (e) => { e.target.value = maskTel(e.target.value); });
+  
   $("in-code").addEventListener("input", (e) => {
     e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
     document.querySelectorAll(".otp-casas i").forEach((c, i) => { c.textContent = e.target.value[i] || ""; c.classList.toggle("on", i === e.target.value.length); });
@@ -1241,7 +1240,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
               <input id="cu-nome" list="cu-lista" placeholder="Produto (ex.: Alface)" autocomplete="off">
               <datalist id="cu-lista">${lista.map((i) => `<option value="${esc(i.nome)}">`).join("")}</datalist>
               <div style="display:grid;grid-template-columns:1fr 110px;gap:10px"><input id="cu-qtd" inputmode="decimal" placeholder="Quantidade"><select id="cu-un"><option value="kg">kg</option><option value="l">litros</option><option value="un">unidades</option></select></div>
-              <input id="cu-valor" inputmode="decimal" placeholder="Quanto pagou no total (R$)">
+              <input id="cu-valor" inputmode="decimal" data-mask="moeda" placeholder="Quanto pagou no total (R$)">
               <input id="cu-forn" placeholder="Fornecedor (opcional)">
               <div class="cu-calc hidden" id="cu-calc"></div>
               <button class="btn primary" id="cu-add">Registrar compra</button>
@@ -1313,7 +1312,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
       };
       const linha = (c) => ed === "c:" + c.id
         ? `<div class="split-row" style="display:grid;gap:8px"><b>${esc(c.nome)}</b>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="ed-qtd" inputmode="decimal" value="${esc(String(c.quantidade).replace(".", ","))}" aria-label="Quantidade em ${esc(c.unidade)}"><input id="ed-valor" inputmode="decimal" value="${esc(String(c.valor_total).replace(".", ","))}" aria-label="Valor pago"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="ed-qtd" inputmode="decimal" value="${esc(String(c.quantidade).replace(".", ","))}" aria-label="Quantidade em ${esc(c.unidade)}"><input id="ed-valor" inputmode="decimal" data-mask="moeda" value="${esc(String(c.valor_total).replace(".", ","))}" aria-label="Valor pago"></div>
             <input id="ed-forn" value="${esc(c.fornecedor || "")}" placeholder="Fornecedor (opcional)">
             <div style="display:flex;gap:8px"><button class="btn primary" data-save-compra="${esc(c.id)}" style="flex:1">Salvar</button><button class="btn" data-cancel style="flex:1">Cancelar</button></div>
             <span class="muted" style="font-size:12px">Quantidade em ${esc(c.unidade)} e valor total pago.</span></div>`
@@ -1467,7 +1466,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
       const ed = cuEstado.edit, opcoes = (sel) => Object.entries(CAT_DESP).map(([k, n]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${n}</option>`).join("");
       const cats = Object.entries(d.por_categoria).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div class="split-row"><div class="split-head"><span>${esc(CAT_DESP[c] || c)}</span><span>${brl(v)} · ${pct(d.total ? (v / d.total) * 100 : 0, 0)}</span></div><div class="bar amber"><i style="width:${d.total ? (v / d.total) * 100 : 0}%"></i></div></div>`).join("");
       const itens = d.despesas.map((x) => ed === "d:" + x.id
-        ? `<div class="split-row" style="display:grid;gap:8px"><select id="ed-cat">${opcoes(x.categoria)}</select><input id="ed-desc" value="${esc(x.descricao || "")}" placeholder="Descrição (opcional)"><input id="ed-dval" inputmode="decimal" value="${esc(String(x.valor).replace(".", ","))}" aria-label="Valor">
+        ? `<div class="split-row" style="display:grid;gap:8px"><select id="ed-cat">${opcoes(x.categoria)}</select><input id="ed-desc" value="${esc(x.descricao || "")}" placeholder="Descrição (opcional)"><input id="ed-dval" inputmode="decimal" data-mask="moeda" value="${esc(String(x.valor).replace(".", ","))}" aria-label="Valor">
             <div style="display:flex;gap:8px"><button class="btn primary" data-save-desp="${esc(x.id)}" style="flex:1">Salvar</button><button class="btn" data-cancel style="flex:1">Cancelar</button></div></div>`
         : `<div class="split-row"><div class="split-head"><span>${esc(CAT_DESP[x.categoria] || x.categoria)}${x.descricao ? " · " + esc(x.descricao) : ""}</span><span>${brl(x.valor)} ${cuBtnIc("data-edit-desp", x.id, "Editar despesa", "✎")} ${cuBtnIc("data-del-desp", x.id, "Remover despesa", "✕")}</span></div></div>`).join("");
       $("cu-corpo").innerHTML = `
@@ -1482,7 +1481,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
         <section class="card"><h2>Adicionar despesa</h2><div style="display:grid;gap:10px">
           <select id="cu-cat">${opcoes("")}</select>
           <input id="cu-desc" placeholder="Descrição (opcional)">
-          <input id="cu-dval" inputmode="decimal" placeholder="Valor (R$)">
+<input id="cu-dval" inputmode="decimal" data-mask="moeda" placeholder="Valor (R$)">
           <button class="btn primary" id="cu-dadd">Adicionar</button></div>
           <p class="foot" style="text-align:left;margin-top:10px">Para imposto sobre as vendas, lance o valor que você paga no mês (ex.: a guia do Simples).</p></section>`;
       const refaz = () => { if (cuVivo("desp")) cuDespesas(); };
