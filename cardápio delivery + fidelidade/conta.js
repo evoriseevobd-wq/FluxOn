@@ -223,14 +223,25 @@ function endRender(){
   });
 }
 async function endPrepararEtapa(){
-  if(!FID.token){ document.getElementById("endSalvos")?.classList.add("hidden"); document.getElementById("endForm")?.classList.remove("hidden"); return; }
+  const box = document.getElementById("endSalvos"), form = document.getElementById("endForm");
+  if(!FID.token){ box?.classList.add("hidden"); form?.classList.remove("hidden"); return; }
+  const aplicar = () => {
+    const lista = CONTA?.enderecos || [];
+    if(lista.length && END_ESCOLHIDO !== "novo" && !lista.some(e => e.id === END_ESCOLHIDO)){
+      END_ESCOLHIDO = lista[0].id;            // principal (ou o último usado) já vem marcado
+      endPreencher(lista[0]);
+    }
+    endRender();
+  };
+  // já tem a conta na memória: mostra o endereço salvo na hora (sem mostrar o formulário vazio antes)
+  const jaTinha = !!CONTA;
+  if(jaTinha) aplicar();
+  else { box?.classList.add("hidden"); form?.classList.add("hidden"); } // ainda não sabe: não mostra nada até saber
+  // confere com o servidor em segundo plano; só redesenha se mudou (ex.: endereço salvo em outro aparelho)
+  const velho = CONTA, antes = JSON.stringify(CONTA?.enderecos || []);
   await contaCarregar();
-  const lista = CONTA?.enderecos || [];
-  if(lista.length && END_ESCOLHIDO !== "novo" && !lista.some(e => e.id === END_ESCOLHIDO)){
-    END_ESCOLHIDO = lista[0].id;              // principal (ou o último usado) já vem marcado
-    endPreencher(lista[0]);
-  }
-  endRender();
+  if(!CONTA && velho) CONTA = velho;          // a internet piscou: fica com o que já tinha
+  if(!jaTinha || JSON.stringify(CONTA?.enderecos || []) !== antes) aplicar();
 }
 
 // liga nas etapas do pedido sem mexer no cardapio.js
