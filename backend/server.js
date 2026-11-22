@@ -9235,7 +9235,7 @@ async function iaContextoLoja(rid) {
 const iaVendidosCache = new Map();
 async function iaMaisVendidos(rid, cardapio) {
   const c = iaVendidosCache.get(rid);
-  if (c && Date.now() - c.t < 10 * 60 * 1000) return c.ranking;
+  if (c && Date.now() - c.t < 30 * 60 * 1000) return c.ranking; // ranking dos últimos 60 dias: 30 min de cache não muda nada
   const desde = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await supabase.from("orders").select("itens")
     .eq("restaurant_id", rid).gte("created_at", desde).order("created_at", { ascending: false }).limit(3000);
