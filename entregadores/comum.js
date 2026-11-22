@@ -153,7 +153,8 @@ const tempoReal = {
     s.on("fila_saiu", (d) => pegar.saiuDaFila(d.ids || [], d.entregador_id));
     s.on("fila_mudou", () => pegar.recarregarLogo());
     s.on("minhas_mudou", (d) => rua.mudou(d || {}));
-    s.on("turno_encerrado", () => { if (S.eu) S.eu.disponivel = false; perfil.bolinha(); aviso("O caixa encerrou o seu turno"); if (S.aba === "dia") ganhos.recarregar(); });
+    s.on("turno_encerrado", (d) => { if (S.eu) S.eu.disponivel = false; perfil.bolinha(); aviso(d?.auto ? "Seu turno fechou depois de 2h sem entrega. Peça pro caixa abrir de novo." : "O caixa encerrou o seu turno"); if (S.aba === "dia") ganhos.recarregar(); });
+    s.on("turno_aberto", () => { if (S.eu) S.eu.disponivel = true; perfil.bolinha(); vibrar(60); aviso("O caixa abriu o seu turno. Bom trabalho!", "bom"); if (S.aba === "dia") ganhos.recarregar(); pegar.recarregarLogo(); });
     s.on("caixa_mandou", (d) => {
       vibrar([150, 80, 150]);
       aviso(`O caixa mandou ${plural(d.qtd, "pedido", "pedidos")} pra você`, "bom");
