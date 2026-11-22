@@ -695,7 +695,8 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
       fv.lista = Array.isArray(lista) ? lista : [];
       fv.vales = v?.funcionarios ? v : { total: 0, funcionarios: [] };
       fv.edit = ""; fv.pin = "";
-      $("content").innerHTML = `<section class="card" id="fv-vales">${htmlVales()}</section><section class="card" id="fv-equipe">${htmlEquipe()}</section>`;
+      $("content").innerHTML = `<section class="card" id="fv-vales">${htmlVales()}</section><section class="card" id="fv-equipe">${htmlEquipe()}</section><section class="card" id="fv-mesa"><h2>Pedidos pelo QR da mesa</h2><div class="empty">Carregando...</div></section>`;
+      mesaAceiteCarregar();
     }).catch((e) => { if (my === st.reqId) $("content").innerHTML = `<div class="card err"><p style="margin:0">${esc(e.message)}</p></div>`; });
     return `<div class="skeleton"></div><div class="skeleton"></div>`;
   }
@@ -733,6 +734,26 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
     catch (e) { alert(e.message); aoErrar ? aoErrar() : fvEquipe(); }
     finally { fv.ocupado = false; }
   }
+    // 🔐 atendente confirma os pedidos do QR da mesa (ligado: o pedido só vai pra cozinha depois do Aceitar no Operacional)
+  const mesaAceiteUrl = () => `/owner/restaurants/${encodeURIComponent(st.view)}/mesa-aceite`;
+  function htmlMesaAceite(ativo) {
+    return `<h2>Pedidos pelo QR da mesa</h2>
+      <div class="split-row"><div class="split-head"><span><b>Atendente confirma os pedidos</b><br><small style="color:var(--muted)">${ativo ? "Ligado: o pedido do QR toca no Operacional e só vai pra cozinha depois do Aceitar." : "Desligado: o pedido do QR vai direto pra cozinha."}</small></span>
+      <button class="btn small${ativo ? " primary" : ""}" id="mesa-aceite-btn" role="switch" aria-checked="${ativo}">${ativo ? "Ligado" : "Desligado"}</button></div></div>
+      <p class="foot" style="text-align:left">Bom pra quem quer controle total. Em casa cheia, deixe desligado: o QR de cada mesa já é único e a página expira sozinha.</p>`;
+  }
+  function mesaAceiteCarregar() {
+    api(mesaAceiteUrl()).then((d) => { const el = $("fv-mesa"); if (el) el.innerHTML = htmlMesaAceite(!!d?.ativo); })
+      .catch(() => { const el = $("fv-mesa"); if (el) el.innerHTML = `<h2>Pedidos pelo QR da mesa</h2><div class="empty">Não deu pra carregar.</div>`; });
+  }
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("#mesa-aceite-btn");
+    if (!b || b.disabled) return;
+    const ligar = b.getAttribute("aria-checked") !== "true";
+    b.disabled = true; b.textContent = "Salvando...";
+    try { const d = await api(mesaAceiteUrl(), { method: "PUT", body: JSON.stringify({ ativo: ligar }) }); $("fv-mesa").innerHTML = htmlMesaAceite(!!d.ativo); }
+    catch (err) { alert(err.message); mesaAceiteCarregar(); }
+  });
   document.addEventListener("click", (e) => {
     if (st.screen !== "func") return;
     const t = e.target.closest("[data-fv-editar],[data-fv-tirar],[data-fv-salvar],[data-fv-cancelar],[data-fv-pin],[data-fv-pin-salvar],[data-fv-pin-tirar],#fv-add");
