@@ -88,7 +88,6 @@ function montarTela(){
     document.querySelectorAll("[data-presente]").forEach(x => x.classList.toggle("on", x === b));
     $("camposPresente").hidden = !VP.presente;
   });
-  ["destTel", "telComprador"].forEach(id => $(id).addEventListener("input", e => { e.target.value = mascaraTel(e.target.value); }));
   $("info").textContent = `Válido por ${l.validade_dias} dias a partir da compra. Pode ser usado aos poucos: o que sobrar continua valendo até a data de validade.`;
   if(l.central_url){
     ["voltar", "okVoltar"].forEach(id => { $(id).href = l.central_url; $(id).hidden = false; });
