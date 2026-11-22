@@ -893,6 +893,7 @@ async function loadRestaurant() {
       return;
     }
     const cfg = await resp.json();
+   window._mesaAceite = !!cfg.mesa_aceite;
     console.log('✅ Config recebida:', cfg);
     console.log('🎨 Cores:', cfg.cor_primaria, cfg.cor_secundaria, cfg.cor_fundo, cfg.tema);
 
@@ -1340,7 +1341,7 @@ async function submitOrder() {
           if (sessaoExpirou(data)) return;
           if (!resp.ok) throw new Error(data.error || 'Erro ao criar pedido');
           closeCheckout();
-          showSuccess(data.order?.order_number);
+          showSuccess(data.order?.order_number, !!window._mesaAceite && data.order?.status === 'pending');
         }
       } catch(e) {
         alert('Erro ao enviar pedido.\n' + e.message);
@@ -1426,9 +1427,25 @@ async function submitOrder() {
       } catch (e) { console.warn('Reenvio do pedido:', e.message); }
     }
     
-    function showSuccess(orderNum) {
+    function showSuccess(orderNum, esperaAceite = false) {
       document.getElementById('success-order-num').textContent = orderNum ? `Pedido #${orderNum}` : 'Pedido confirmado';
+      const msg = document.querySelector('#success-screen .success-msg');
+      if (msg) msg.textContent = esperaAceite ? 'Seu pedido foi enviado para o caixa. Assim que aceito, ele vai para a cozinha.' : 'Seu pedido foi enviado para a cozinha. Aguarde, logo estará pronto!';
       document.getElementById('success-screen').classList.add('open');
+      if (esperaAceite) acompanharAceite();
+    }
+    // o atendente aceita no Operacional: a mensagem muda sozinha
+    function acompanharAceite() {
+      clearInterval(window._aceiteTimer);
+      const msg = document.querySelector('#success-screen .success-msg');
+      window._aceiteTimer = setInterval(async () => {
+        try {
+          const d = await fetch(`${API_BASE}/api/v1/pedidos-mesa?restaurant_id=${restaurantId}&sessao=${encodeURIComponent(sessaoMesa || '')}`).then(r => r.json());
+          if (d.pedido && d.pedido.status === 'pending') return; // ainda esperando
+          clearInterval(window._aceiteTimer);
+          if (msg) msg.textContent = d.pedido ? 'Pedido aceito! Já está sendo preparado.' : 'Seu pedido não foi aceito. Fale com o atendente.';
+        } catch {}
+      }, 8000);
     }
 
     function resetAll() {
