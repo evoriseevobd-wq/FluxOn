@@ -100,7 +100,7 @@ function contaRender(){
       <h3>Seus dados</h3>
       <div class="field"><label for="contaNome">Nome</label><input type="text" id="contaNome" value="${escHtml(CONTA.nome)}" maxlength="80"></div>
       <div class="field"><label>Telefone (WhatsApp)</label><input type="text" value="${escHtml(telefoneMascara(CONTA.telefone))}" disabled></div>
-      ${CONTA.nascimento_ativo ? `<div class="field"><label for="contaNasc">Data de nascimento</label><input type="text" id="contaNasc" value="${escHtml(nascParaTela(CONTA.nascimento))}" placeholder="DD/MM/AAAA" inputmode="numeric" maxlength="10" autocomplete="bday"><small class="nasc-nota">Usamos somente para lembrar do seu aniversário.</small></div>` : ""}
+      ${CONTA.nascimento_ativo ? `<div class="field"><label for="contaNasc">Data de nascimento</label><input type="text" id="contaNasc" data-mask="data" value="${escHtml(nascParaTela(CONTA.nascimento))}" placeholder="DD/MM/AAAA" inputmode="numeric" maxlength="10" autocomplete="bday"><small class="nasc-nota">Usamos somente para lembrar do seu aniversário.</small></div>` : ""}
       <button class="conta-btn" id="contaSalvarNome">Salvar</button>
     </section>
     <section class="conta-sec">
@@ -118,7 +118,6 @@ function contaRender(){
       <button class="conta-btn contorno" id="contaAddEnd">+ Adicionar endereço</button>
     </section>`;
   const nascInp = document.getElementById("contaNasc");
-  if(nascInp) nascInp.addEventListener("input", () => { nascInp.value = nascMascara(nascInp.value); });
   document.getElementById("contaSalvarNome").onclick = async (ev) => {
     const nome = document.getElementById("contaNome").value.trim();
     if(!nome){ shake("contaNome"); return; }
@@ -154,7 +153,7 @@ function contaFormEndereco(){
   const box = document.getElementById("contaNovoEnd");
   box.innerHTML = `
     <div class="conta-form">
-      <div class="field"><label for="ceCep">CEP</label><input type="text" id="ceCep" placeholder="00000-000" inputmode="numeric" maxlength="9"><div class="cep-info" id="ceCepInfo"></div></div>
+      <div class="field"><label for="ceCep">CEP</label><input type="text" id="ceCep" data-mask="cep" placeholder="00000-000" inputmode="numeric" maxlength="9"><div class="cep-info" id="ceCepInfo"></div></div>
       <div class="field-row">
         <div class="field" style="flex:2"><label for="ceRua">Rua</label><input type="text" id="ceRua"></div>
         <div class="field" style="flex:1"><label for="ceNum">Número</label><input type="text" id="ceNum"></div>
@@ -356,7 +355,7 @@ async function contaPerguntarNascimento(tentativa = 0){
           <button class="sheet-back" id="nascFechar" aria-label="Fechar">✕</button>
         </div>
         <p class="login-txt">${nome ? `${escHtml(nome)}, qual` : "Qual"} é a sua data de nascimento? 🎂</p>
-        <div class="field"><label for="nascInp">Data de nascimento</label><input type="text" id="nascInp" placeholder="DD/MM/AAAA" inputmode="numeric" maxlength="10" autocomplete="bday"><small class="nasc-nota">Usamos somente para lembrar do seu aniversário.</small></div>
+        <div class="field"><label for="nascInp">Data de nascimento</label><input type="text" id="nascInp" data-mask="data" placeholder="DD/MM/AAAA" inputmode="numeric" maxlength="10" autocomplete="bday"><small class="nasc-nota">Usamos somente para lembrar do seu aniversário.</small></div>
         <button class="checkout-btn" id="nascSalvar">Salvar</button>
         <button type="button" class="nasc-pular" id="nascPular">Agora não</button>
       </div>
@@ -369,7 +368,6 @@ async function contaPerguntarNascimento(tentativa = 0){
     gsap.to(wrap, { opacity:0, duration:.22, onComplete:() => wrap.remove() });
   };
   const inp = document.getElementById("nascInp");
-  inp.addEventListener("input", () => { inp.value = nascMascara(inp.value); });
   inp.addEventListener("keydown", e => { if(e.key === "Enter") document.getElementById("nascSalvar").click(); });
   document.getElementById("nascFechar").onclick = () => fechar(true);
   document.getElementById("nascPular").onclick = () => fechar(true);
