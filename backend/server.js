@@ -5976,6 +5976,7 @@ app.get("/api/v1/restaurante/:restaurant_id/agendados", requireAuth, async (req,
 });
 
 // a cada minuto: agendado que chegou na hora (horário - antecedência) vira pedido novo na cozinha
+async function liberarAgendados() {
   if (!(await travaUnica("agendados", 50000))) return;
   try {
     const limite = new Date(Date.now() + 180 * 60 * 1000).toISOString();
@@ -8404,6 +8405,7 @@ let aniversarioRodando = false;
 async function processarAniversarios() {
   if (aniversarioRodando) return;
   const agoraSP = new Date(Date.now() - SP_OFFSET_MS);
+  if (agoraSP.getUTCHours() < 9) return;
   if (!(await travaUnica("aniversarios", 25 * 60000))) return;
   aniversarioRodando = true;
   try {
@@ -9285,7 +9287,8 @@ app.post("/api/v1/ia/sugestao", async (req, res) => {
     if (!canUseCardapioIA(planIA)) return planError(res, planIA, "advanced");
 
     const chaveIA = `${restaurant_id}:${new Date().toISOString().slice(0, 10)}`;
-    const usoIA = (iaUso.get(chaveIA) || 0) + 1;
+    const usoIA = await contarUso(`ia:${chaveIA}`, 26 * 3600); // um contador só pra todas as réplicas
+    if (usoIA > IA_LIMITE_DIARIO) return res.status(429).json({ error: "Limite diário do assistente atingido" });
 
     // Busca o cardápio ativo real — a IA só pode sugerir o que existe aqui
     const [{ data: cardapio, error }, loja, mapaAdc] = await Promise.all([
