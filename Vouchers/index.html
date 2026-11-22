@@ -37,14 +37,14 @@
     </div>
     <div class="vp-campos" id="camposPresente">
       <label>Nome de quem vai ganhar<input id="destNome" maxlength="80" autocomplete="off" placeholder="Ex.: Maria"></label>
-      <label>WhatsApp de quem vai ganhar<input id="destTel" inputmode="tel" placeholder="(00) 00000-0000"></label>
+      <label>WhatsApp de quem vai ganhar<input id="destTel" inputmode="tel" data-mask="tel" placeholder="(00) 00000-0000"></label>
       <label>Mensagem (opcional)<textarea id="mensagem" maxlength="200" rows="2" placeholder="Ex.: Feliz aniversário! Aproveite 💛"></textarea></label>
     </div>
 
     <h2><span>3</span> Seus dados</h2>
     <div class="vp-campos">
       <label>Seu nome<input id="nomeComprador" maxlength="80" autocomplete="name" placeholder="Como você se chama?"></label>
-      <label>Seu WhatsApp<input id="telComprador" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
+      <label>Seu WhatsApp<input id="telComprador" inputmode="tel" data-mask="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
     </div>
 
     <p class="vp-info" id="info"></p>
@@ -83,6 +83,7 @@
 
 <div class="aviso" id="aviso" hidden></div>
 
-<script src="script.js"></script>
+<script src="mascaras.js"></script>
+<script src="script.js?v=2"></script>
 </body>
 </html>
