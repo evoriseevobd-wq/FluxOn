@@ -232,8 +232,7 @@
           <span class="ent-pg">${esc(pagamentoTxt(e))}</span>
         </div>
         <div class="ent-item-acoes">
-          ${e.ativo ? `<button class="ghost-button small" type="button" data-acao="codigo" title="Código pra entrar no app">🔑 Código</button>` : ""}
-          <button class="ghost-button small" type="button" data-acao="editar">Editar</button>
+          ${e.ativo && !e.turno_aberto ? `<button class="ghost-button small ent-abrir" type="button" data-acao="abrir-turno">Abrir turno</button>` : ""}
         </div>
       </div>`;
     }).join("");
@@ -249,6 +248,12 @@
     if (!ent) return;
     if (b.dataset.acao === "editar") formulario(ent);
     else if (b.dataset.acao === "codigo") gerarCodigo(ent);
+    else if (b.dataset.acao === "abrir-turno") {
+      b.disabled = true;
+      api(`/${ent.id}/abrir-turno`, { method: "POST" })
+        .then(() => { aviso(`Turno de ${ent.nome} aberto ✓`); carregarLista(); carregarHoje(); })
+        .catch((err) => { aviso(err.message, true); b.disabled = false; });
+    }
   });
 
   /* ---------- janela própria (cadastro, código, escolher entregador) ---------- */
@@ -293,7 +298,7 @@
       mostra("#ent-diaria-campo", t !== "entrega");
       f.querySelector("#ent-entrega-campo").style.display = t === "diaria" ? "none" : "grid";
       mostra(".ent-dica", t !== "diaria");
-      f.querySelector("#ent-entrega-rotulo").textContent = form.entrega_por_km.checked ? "Valor por km (R$)" : "Valor por entrega (R$)";
+      f.querySelector("#ent-entrega-rotulo").textContent = form.entrega_por_km.checked ? "Valor por km, ida e volta (R$)" : "Valor por entrega (R$)";
     };
     form.addEventListener("change", diaria); diaria();
          // excluir: o primeiro toque pede confirmação, o segundo exclui
@@ -347,7 +352,9 @@
     const h = E.hoje;
     desenharResumo();
     if (!h || !h.entregadores.length) { box.innerHTML = `<p class="ent-nada">Nenhuma entrega hoje ainda. Quando alguém começar o turno, o resumo do que pagar aparece aqui.</p>`; return; }
-    const hm = (iso) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    // turno de outro dia mostra a data junto (senão parece que é de hoje)
+    const hm = (iso) => { const d = new Date(iso), h = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      return Date.now() - d.getTime() > 20 * 3600000 ? `${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${h}` : h; };
     box.innerHTML = `
       <div class="ent-hoje">${h.entregadores.map((e) => `
         <div class="ent-hoje-linha">
@@ -380,10 +387,17 @@
       <h3>Configurações</h3>
       <label class="ent-switch"><input type="checkbox" id="ent-avisar" ${E.config.avisar_cliente ? "checked" : ""}><i aria-hidden="true"></i>
         <span><b>Avisar o cliente no WhatsApp</b><small>Quando o pedido sai, ele recebe o link do mapa pra acompanhar a entrega</small></span></label>
+        <label class="ent-minimo"><span><b>Valor mínimo por entrega</b><small>Pra quem recebe por km: entrega pertinho nunca paga menos que isso</small></span>
+        <input type="text" inputmode="decimal" id="ent-minimo" value="${String((E.config.valor_minimo_entrega || 0).toFixed(2)).replace(".", ",")}" aria-label="Valor mínimo por entrega"></label>
       ${link ? `<div class="ent-link"><span>Link do app dos entregadores</span><div class="ent-link-linha"><b>${esc(link)}</b><button class="ghost-button small" type="button" id="ent-copiar">Copiar</button></div></div>` : ""}`;
     document.getElementById("ent-avisar").onchange = async (e) => {
       try { await api("/config", { method: "PATCH", body: { avisar_cliente: e.target.checked } }); E.config.avisar_cliente = e.target.checked; aviso("Salvo ✓"); }
       catch (err) { e.target.checked = !e.target.checked; aviso(err.message, true); }
+    };
+         document.getElementById("ent-minimo").onchange = async (e) => {
+      const v = e.target.value.replace(/\./g, "").replace(",", ".") || "0";
+      try { await api("/config", { method: "PATCH", body: { valor_minimo_entrega: v } }); E.config.valor_minimo_entrega = Number(v); e.target.value = Number(v).toFixed(2).replace(".", ","); aviso("Salvo ✓"); }
+      catch (err) { aviso(err.message, true); }
     };
     document.getElementById("ent-copiar")?.addEventListener("click", () => { navigator.clipboard?.writeText(link).then(() => aviso("Link copiado ✓")); });
   }
