@@ -33,6 +33,9 @@ const redisOpts = {
 const redisConnection = REDIS_ON ? new Redis(process.env.REDIS_URL, { ...redisOpts, maxRetriesPerRequest: null }) : null;
 const pubClient = REDIS_ON ? new Redis(process.env.REDIS_URL, redisOpts) : null;
 const subClient = REDIS_ON ? new Redis(process.env.REDIS_URL, redisOpts) : null;
+// erro de conexão do Redis vira uma linha limpa no log (sem "Unhandled error event"); o ioredis reconecta sozinho
+for (const [nome, c] of [["fila", redisConnection], ["pub", pubClient], ["sub", subClient]])
+  c?.on("error", (e) => console.warn(`⚠️ Redis (${nome}): ${e.message}`));
 
 // ===== FILA DE IMPRESSÃO =====
 // sem Redis: imprime na hora, direto (igual o worker faria), sem travar a resposta do pedido
