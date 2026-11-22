@@ -3719,3 +3719,11 @@ input.adc-obs:focus { border-bottom: 1px solid rgba(249,115,115,0.7) !important;
 @keyframes aceitePulso { 0%, 100% { box-shadow: 0 18px 50px rgba(0,0,0,0.6), 0 0 0 0 rgba(249,115,115,0.35); } 50% { box-shadow: 0 18px 50px rgba(0,0,0,0.6), 0 0 0 8px rgba(249,115,115,0); } }
 @media (prefers-reduced-motion: reduce) { .aceite-barra { animation: none; } }
 
+
+/* ===== 🖨️ Comanda que não imprimiu ===== */
+.fila-imp { position: fixed; top: 76px; right: 16px; z-index: 8990; width: min(420px, calc(100vw - 32px)); display: grid; gap: 8px; }
+.fila-imp-item { display: grid; gap: 10px; padding: 12px 14px; border-radius: 14px; background: #121212; border: 1px solid rgba(255,255,255,0.14); color: rgba(252,228,228,0.9); font-size: 13px; box-shadow: 0 14px 40px rgba(0,0,0,0.55); }
+.fila-imp-item.erro { border-color: rgba(249,115,115,0.6); background: #140b0b; }
+.fila-imp-botoes { display: flex; gap: 8px; justify-content: flex-end; }
+.fila-imp-botoes button { padding: 7px 12px; font-size: 12.5px; }
+
