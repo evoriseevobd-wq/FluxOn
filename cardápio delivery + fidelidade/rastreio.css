@@ -82,3 +82,17 @@ body.aba-fid .rt-faixa, body.rt-aberto .rt-faixa{ display:none; }
 .leaflet-tooltip-top.rt-balao::before{ border-top-color:var(--text); }
 
 @media (prefers-reduced-motion: reduce){ .rt-faixa, .rt-tela.on{ animation:none; } .rt-passos li.agora i{ animation:none; } }
+
+/* plano sem mapa (Essential): no lugar do mapa, a linha do tempo com o horário de cada etapa */
+.rt-tela.sem-mapa .rt-mapa{ display:none; }
+.rt-tela.sem-mapa .rt-card{ top:calc(68px + env(safe-area-inset-top)); max-height:none; }
+.rt-passos.rt-linha{ display:block; margin:18px 0 6px; }
+.rt-linha li{ position:relative; display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:14px 0 14px 28px; border-top:1px solid var(--line); text-align:left; }
+.rt-linha li:last-child{ border-bottom:1px solid var(--line); }
+.rt-linha i{ position:absolute; left:2px; top:50%; width:12px; height:12px; margin-top:-6px; border-radius:50%; background:var(--line); }
+.rt-linha li.feito i{ background:var(--red); }
+.rt-linha li.agora i{ background:var(--red); box-shadow:0 0 0 5px color-mix(in srgb, var(--red) 25%, transparent); animation:none; }
+.rt-linha b{ font-size:15px; white-space:normal; overflow:visible; }
+.rt-linha small{ font-size:14px; min-height:0; }
+
+
