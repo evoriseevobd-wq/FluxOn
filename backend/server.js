@@ -11492,7 +11492,7 @@ app.get("/health", async (req, res) => {
 });
 
 // ===== ENTREGADORES (app do entregador, mapa ao vivo e acertos) — tudo no entregador.js =====
-registrarEntregador({ app, io, supabase, emitOrderUpdate, getIntegracao, readAuth, ALLOWED_ORIGINS_FIXED, PORT, OWNER_OTP_WEBHOOK_URL, OWNER_OTP_WEBHOOK_SECRET });registrarEntregador({ app, io, supabase, emitOrderUpdate, getIntegracao, readAuth, ALLOWED_ORIGINS_FIXED, PORT, OWNER_OTP_WEBHOOK_URL, OWNER_OTP_WEBHOOK_SECRET, travaUnica });
+registrarEntregador({ app, io, supabase, emitOrderUpdate, getIntegracao, readAuth, ALLOWED_ORIGINS_FIXED, PORT, OWNER_OTP_WEBHOOK_URL, OWNER_OTP_WEBHOOK_SECRET });
 // ===== ERROR HANDLER =====
 app.use((err, req, res, next) => {
   console.error("❌ Erro:", err);
