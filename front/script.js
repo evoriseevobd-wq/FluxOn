@@ -1318,8 +1318,8 @@ function rodNovo() {
       <label>Nome <input id="rn-nome" value="Rodízio"></label>
       <label>Data <input id="rn-data" type="date"></label>
       <label>Horário <input id="rn-hora" type="time" value="20:00"></label>
-      <label>Preço por adulto <input id="rn-preco" type="number" step="0.01" min="0"></label>
-      <label>Preço criança (opcional) <input id="rn-cr" type="number" step="0.01" min="0"></label>
+      <label>Preço por adulto <input id="rn-preco" data-mask="moeda" type="number" step="0.01" min="0"></label>
+      <label>Preço criança (opcional) <input id="rn-cr" data-mask="moeda" type="number" step="0.01" min="0"></label>
       <label>Vagas <input id="rn-vagas" type="number" min="1" value="40"></label>
     </div>
     <div class="modal-actions"><button class="primary-button" id="rn-ok">Abrir rodízio</button></div>`);
@@ -1535,7 +1535,7 @@ function rodAdicionar() {
     <div class="modal-header"><h3>Adicionar reserva</h3><button class="icon-button" id="ra-x">×</button></div>
     <div class="modal-body form-body">
       <label>Nome <input id="ra-nome"></label>
-      <label>Telefone (obrigatório para cobrar no Pix) <input id="ra-tel" type="tel"></label>
+      <label>Telefone (obrigatório para cobrar no Pix) <input id="ra-tel" type="tel" data-mask="tel"></label>
       <label>Adultos <input id="ra-ad" type="number" min="0" value="1"></label>
       <label>Crianças <input id="ra-cr" type="number" min="0" value="0"></label>
       <div id="ra-total" style="font-weight:900;font-size:18px;color:#fbbf24;"></div>
@@ -1696,7 +1696,7 @@ function editarPedidoMesa(key) {
             </div>
             <div style="flex:1;">
               <label style="font-size:11px; color:rgba(252,228,228,0.4); text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:5px;">Telefone</label>
-              <input id="ep-telefone" type="text" value="${escapeHtml(pedido.client_phone || "")}"
+              <input id="ep-telefone" type="text" data-mask="tel" value="${escapeHtml(pedido.client_phone || "")}"
                 style="width:100%; background:rgba(255,255,255,0.06); border:0.5px solid rgba(255,255,255,0.12); border-radius:8px; padding:9px 12px; color:rgba(252,228,228,0.95); font-size:13px; box-sizing:border-box; outline:none; font-family:inherit;" />
             </div>
           </div>
@@ -4513,7 +4513,7 @@ try {
             </div>
             <div id="crm-edit-mode" class="crm-jedit" style="display:none;">
               <input id="crm-edit-nome" type="text" value="${escapeHtml(client.client_name || "")}" placeholder="Nome" />
-              <input id="crm-edit-telefone" type="text" value="${escapeHtml(client.client_phone || "")}" placeholder="Telefone" />
+              <input id="crm-edit-telefone" type="text" data-mask="tel" value="${escapeHtml(client.client_phone || "")}" placeholder="Telefone" />
               <div style="display:flex; gap:8px;">
                 <button class="ghost-button" id="crm-edit-cancel" style="flex:1; padding:8px; font-size:12px;">Cancelar</button>
                 <button class="primary-button" id="crm-edit-save" style="flex:1; padding:8px; font-size:12px;">Salvar</button>
@@ -5171,7 +5171,7 @@ window.alterarQtd = function(index, delta) {
           <div style="font-size:13px; color:rgba(252,228,228,0.7);">Qual o valor?</div>
           <div style="position:relative;">
             <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:rgba(252,228,228,0.4); font-size:13px;">R$</span>
-            <input id="modal-valor-livre" type="number" min="0" step="0.01" placeholder="0,00"
+            <input id="modal-valor-livre" data-mask="moeda" type="number" min="0" step="0.01" placeholder="0,00"
               style="width:100%; padding:12px 14px 12px 36px; border-radius:10px;
               border:1px solid rgba(255,255,255,0.18); background:rgba(28,28,30,0.45);
               color:rgba(252,228,228,1); font-size:16px; outline:none; font-family:inherit;" />
@@ -6847,7 +6847,7 @@ async function openItemModal(item = null) {
             style="width:100%; margin-top:6px; padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:14px; outline:none;" />
         </label>
         <label style="color:rgba(252,228,228,0.8); font-size:13px;">Preço *
-          <input id="item-preco" value="${item ? item.preco : ""}" placeholder="0,00" inputmode="decimal"
+          <input id="item-preco" data-mask="moeda" value="${item ? item.preco : ""}" placeholder="0,00" inputmode="decimal"
             style="width:100%; margin-top:6px; padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:14px; outline:none;" />
         </label>
        <label style="color:rgba(252,228,228,0.8); font-size:13px;">Categoria
@@ -6974,7 +6974,7 @@ function adicionarVariacao(nome = "", preco = "", textoLivre = false, filtro = "
       style="flex:2; min-width:120px; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:13px; outline:none;"
       class="variacao-nome" />
-    <input placeholder="0,00" value="${preco}" inputmode="decimal"
+    <input placeholder="0,00" value="${preco}" inputmode="decimal" data-mask="moeda"
       style="flex:1; min-width:70px; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(28,28,30,0.45); color:rgba(252,228,228,1); font-size:13px; outline:none;"
       class="variacao-preco" />
@@ -8104,7 +8104,7 @@ function showAberturaCaixa() {
           ${_sectionTitle("💵", "Fundo de Caixa Inicial")}
           <div style="position:relative;">
             <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:rgba(252,228,228,0.4); font-size:13px;">R$</span>
-            <input id="cx-fundo" type="number" min="0" step="0.01" placeholder="0,00"
+            <input id="cx-fundo" data-mask="moeda" type="number" min="0" step="0.01" placeholder="0,00"
               style="width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18); border-radius:10px; padding:10px 14px 10px 36px; color:rgba(252,228,228,0.95); font-size:14px; outline:none;" />
           </div>
         </div>
@@ -8319,7 +8319,7 @@ async function _showFechamentoCaixa() {
             <div style="font-size:11px; color:rgba(252,228,228,0.5); margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Dinheiro contado na gaveta</div>
             <div style="position:relative;">
               <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:rgba(252,228,228,0.4); font-size:13px;">R$</span>
-              <input id="cx-contado" type="number" min="0" step="0.01" placeholder="0,00"
+              <input id="cx-contado" data-mask="moeda" type="number" min="0" step="0.01" placeholder="0,00"
                 oninput="_atualizarDiferenca(${dinheiroEsperado})"
                 style="width:100%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.18); border-radius:10px; padding:10px 14px 10px 36px; color:rgba(252,228,228,0.95); font-size:14px; outline:none;" />
             </div>
@@ -9950,7 +9950,7 @@ function adcAdminDesenhar(foco) {
         ${(l.itens || []).map((a, ai) => `
           <div class="adc-adm-linha${a.ativo === false ? " off" : ""}">
             <input data-adm="anome" data-l="${li}" data-a="${ai}" value="${escapeHtml(a.nome || "")}" maxlength="50" placeholder="Ex.: Bacon 50g" style="${ADC_CAMPO}">
-            <input data-adm="apreco" data-l="${li}" data-a="${ai}" value="${a.preco != null && a.preco !== "" ? String(a.preco).replace(".", ",") : ""}" inputmode="decimal" placeholder="0,00" style="${ADC_CAMPO} text-align:right;">
+       <input data-adm="apreco" data-mask="moeda" data-l="${li}" data-a="${ai}" value="${a.preco != null && a.preco !== "" ? String(a.preco).replace(".", ",") : ""}" inputmode="decimal" placeholder="0,00" style="${ADC_CAMPO} text-align:right;">
             <input data-adm="amax" data-l="${li}" data-a="${ai}" value="${a.max || 10}" inputmode="numeric" maxlength="2" style="${ADC_CAMPO} text-align:center;">
             <button type="button" class="cd-sw${a.ativo === false ? "" : " on"}" data-adm-pausa="${li}:${ai}" role="switch" aria-checked="${a.ativo === false ? "false" : "true"}" title="${a.ativo === false ? "Ativar" : "Pausar (acabou)"}"></button>
             <button type="button" class="adc-x" data-adm-tira="${li}:${ai}" aria-label="Tirar">×</button>
