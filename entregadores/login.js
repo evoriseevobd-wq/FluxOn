@@ -14,7 +14,6 @@ const login = (() => {
     setTimeout(() => $("in-tel").focus(), 50);
   }
 
-  mascaraTel($("in-tel"));
 
   $("form-tel").addEventListener("submit", async (e) => {
     e.preventDefault();
