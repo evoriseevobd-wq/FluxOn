@@ -227,13 +227,6 @@ async function turnoAberto(entId) {
 async function garantirTurno(ent) {
   const aberto = await turnoAberto(ent.id);
   if (aberto) return aberto;
-   // o último turno de hoje fechou sozinho (2h sem entrega)? reabre ele mesmo
-  const { data: ult } = await C.supabase.from("entregador_turnos").select("id, encerrado_por").eq("entregador_id", ent.id).gte("inicio", inicioDoDia()).order("inicio", { ascending: false }).limit(1);
-  if (ult?.[0]?.encerrado_por === "automatico") {
-    const { data: volta } = await C.supabase.from("entregador_turnos").update({ fim: null, encerrado_por: null, reaberto_em: new Date().toISOString() })
-      .eq("id", ult[0].id).not("fim", "is", null).select("id, inicio, fim, valor_turno, restaurant_id").maybeSingle();
-    if (volta) { C.io.to(volta.restaurant_id).emit("entregadores_mudou"); return volta; }
-  }
    const { data: e } = await C.supabase.from("entregadores").select("restaurant_id, tipo_pagamento, valor_diaria").eq("id", ent.id).maybeSingle();
   if (!e) throw new Error("Entregador não encontrado");
   const { data, error } = await C.supabase.from("entregador_turnos")
@@ -1016,28 +1009,6 @@ supabase.from("entregadores").select("id, nome, telefone, tipo_pagamento, valor_
       return res.json({ success: true });
     } catch (err) { return erro(res, 500, "Não deu pra abrir o turno", err); }
   });
-
-  // ⏱️ turno parado: 2h sem entrega e sem pedido na rua → fecha sozinho (a cada 10 min, um servidor só)
-  const fecharParados = async () => {
-    if (ctx.travaUnica && !(await ctx.travaUnica("turnos-parados", 9 * 60000))) return;
-    const { data: abertos } = await supabase.from("entregador_turnos").select("id, entregador_id, restaurant_id, inicio, reaberto_em").is("fim", null);
-    for (const t of abertos || []) {
-      const desde = t.reaberto_em && depois(t.reaberto_em, t.inicio) ? t.reaberto_em : t.inicio;
-      if (Date.now() - Date.parse(desde) < 2 * 3600000) continue;
-      const [{ count: naRua }, { data: ult }] = await Promise.all([
-        supabase.from("orders").select("id", { count: "exact", head: true }).eq("entregador_id", t.entregador_id).eq("status", "delivering"),
-        supabase.from("orders").select("delivered_at").eq("entregador_id", t.entregador_id).eq("status", "finished").gte("delivered_at", desde).order("delivered_at", { ascending: false }).limit(1)
-      ]);
-      if (naRua || (ult?.[0] && Date.now() - Date.parse(ult[0].delivered_at) < 2 * 3600000)) continue;
-      const { data: fechou } = await supabase.from("entregador_turnos").update({ fim: new Date().toISOString(), encerrado_por: "automatico" }).eq("id", t.id).is("fim", null).select("id");
-      if (!fechou?.length) continue;
-      await supabase.from("entregadores").update({ disponivel: false }).eq("id", t.entregador_id);
-      _cacheAtivos.delete(t.entregador_id);
-      io.to(t.restaurant_id).emit("entregadores_mudou");
-      io.to(`entd:${t.entregador_id}`).emit("turno_encerrado", { auto: true });
-    }
-  };
-  setInterval(() => fecharParados().catch((e) => console.error("⚠️ turnos parados:", e.message)), 10 * 60000);
    
   // o caixa encerra o turno de quem esqueceu
   app.post(`${OP}/:id/encerrar-turno`, async (req, res) => {
