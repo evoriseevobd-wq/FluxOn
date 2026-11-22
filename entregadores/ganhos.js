@@ -22,16 +22,15 @@ const ganhos = (() => {
     } catch (err) { btn.disabled = false; delete btn.dataset.certeza; btn.textContent = acao === "comecar" ? "Começar turno" : "Encerrar turno"; aviso(err.message, "ruim"); }
   }
 
+  // quem abre e encerra o turno é o caixa: aqui ele só vê
   function turnoHtml(t) {
     if (t?.aberto) return `
       <div class="bloco turno on">
-        <div class="linha"><div class="meio"><b>● Em turno desde ${hora(t.inicio)}</b><small>Tudo que você entregar entra neste turno</small></div></div>
-        <button class="btn grande largo" type="button" data-turno="encerrar">Encerrar turno</button>
+        <div class="linha"><div class="meio"><b>● Em turno desde ${hora(t.inicio)}</b><small>Tudo que você entregar entra neste turno. Pra encerrar, fale com o caixa.</small></div></div>
       </div>`;
     return `
       <div class="bloco turno">
-        <div class="linha"><div class="meio"><b>${t ? `Turno encerrado às ${hora(t.fim)}` : "Você ainda não começou o turno"}</b><small>${t ? `Começou às ${hora(t.inicio)}. O resumo dele está aqui embaixo.` : "Se pegar um pedido, o turno começa sozinho."}</small></div></div>
-        <button class="btn primario grande largo" type="button" data-turno="comecar">${t ? "Começar novo turno" : "Começar turno"}</button>
+        <div class="linha"><div class="meio"><b>${t ? `Turno encerrado às ${hora(t.fim)}` : "Seu turno ainda não foi aberto"}</b><small>${t ? `Começou às ${hora(t.inicio)}. Pra voltar, peça pro caixa abrir o turno.` : "Quando chegar no restaurante, peça pro caixa abrir o seu turno."}</small></div></div>
       </div>`;
   }
 
@@ -42,7 +41,7 @@ const ganhos = (() => {
     const linhas = [];
     if (g.tipo_pagamento !== "diaria") linhas.push([`${plural(g.entregas, "entrega", "entregas")}`, moeda(g.por_entrega)]);
     else linhas.push([`${plural(g.entregas, "entrega feita", "entregas feitas")}`, "—"]);
-    if (g.tipo_pagamento !== "entrega") linhas.push([g.diaria ? "Diária do turno" : "Diária (conta quando você começar o turno)", moeda(g.diaria || g.valor_diaria)]);
+    if (g.tipo_pagamento !== "entrega") linhas.push([g.diaria ? "Diária do turno" : "Diária (conta quando o caixa abrir o turno)", moeda(g.diaria || g.valor_diaria)]);
 
     const acertadas = d.rodadas.filter((r) => r.status === "acertada" && r.dinheiro > 0);
     const pendentes = d.rodadas.filter((r) => r.status === "a_acertar");
