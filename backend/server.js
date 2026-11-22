@@ -15,7 +15,7 @@ import Redis from "ioredis";
 import ws from "ws";
 import OpenAI from "openai";
 import crypto from "crypto";
-import { registrarEntregador, entregadorAoAtualizarPedido } from "./entregador.js";
+import { registrarEntregador, entregadorAoAtualizarPedido, kmIdaEndereco } from "./entregador.js";
 
 dotenv.config();
 
@@ -494,7 +494,7 @@ const hasPlan = (plan, min) => planLevel(plan) >= planLevel(min);
 // ESSENTIAL (tudo que não está aqui): delivery (Kanban, app de pedidos, Pix, acompanhamento por etapas), salão (mesas,
 // QR, reserva de mesa, rodízio), caixa, cardápio, impressão, nota fiscal, Central do cliente, Owner básico
 const RECURSOS_PLANO = {
-  entregador: "advanced", fidelidade: "advanced", crm: "advanced", vale: "advanced", agendamento: "advanced",
+  entregador: "essential", mapa_entregador: "advanced", fidelidade: "advanced", crm: "advanced", vale: "advanced", agendamento: "advanced",
   cardapio_ia: "advanced", estoque: "advanced", ia_whatsapp: "advanced", carrinho_abandonado: "advanced", sugestao_semanal: "advanced",
   relatorios: "executive", custos: "executive", campanhas: "executive", chat_ia: "executive", multiunidade: "custom",
   vale_funcionario: "executive"
@@ -2977,6 +2977,50 @@ console.log(`🖨️ Job de impressão adicionado — Pedido #${data.order_numbe
   }
 });
 
+// ===== 🛵 FRETE (o que o cliente paga de entrega) =====
+// fixo: a taxa de entrega da config · por km: km rodados (ida e volta) × valor por km, arredondado de R$ 0,50 em R$ 0,50, nunca menos que o mínimo
+// zona rural: bairro/estrada da lista (ou marcado pelo caixa) paga o valor rural
+const FRETE_CAMPOS = "taxa_entrega, frete_modo, frete_km, frete_minimo, frete_rural_valor, frete_rural_lista";
+const _semAcento = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+function enderecoRural(address, lista) {
+  const [rua = "", bairro = ""] = String(address || "").split(" - ").map(_semAcento);
+  return (Array.isArray(lista) ? lista : []).map(_semAcento).filter(Boolean).some((l) => bairro === l || bairro.includes(l) || rua.includes(l));
+}
+async function calcularFrete(rid, address, { rural = false } = {}) {
+  const { data: cfg } = await supabase.from("restaurante_config").select(FRETE_CAMPOS).eq("restaurant_id", rid).maybeSingle();
+  const fixo = Math.max(0, Number(cfg?.taxa_entrega) || 0);
+  const ruralValor = Math.max(0, Number(cfg?.frete_rural_valor) || 0);
+  if (ruralValor > 0 && (rural || enderecoRural(address, cfg?.frete_rural_lista))) return { valor: _r2(ruralValor), rural: true, km: null, modo: cfg?.frete_modo === "km" ? "km" : "fixo" };
+  if (cfg?.frete_modo !== "km") return { valor: fixo, rural: false, km: null, modo: "fixo" };
+  const minimo = Math.max(0, Number(cfg.frete_minimo) || 0);
+  const ida = address ? await kmIdaEndereco(rid, address).catch((e) => { console.warn("⚠️ frete (km):", e.message); return null; }) : null;
+  if (ida == null) return { valor: minimo || fixo, rural: false, km: null, modo: "km", calculado: false }; // sem TomTom ou endereço não achado: o mínimo (o caixa ajusta)
+  const porKm = Math.ceil(_r2(ida * 2 * (Number(cfg.frete_km) || 0)) * 2) / 2;
+  return { valor: _r2(Math.max(porKm, minimo)), rural: false, km: _r2(ida), modo: "km", calculado: true };
+}
+// config do frete (Operacional → Frete e entregadores): todos os planos
+app.get("/api/v1/restaurante/:restaurant_id/frete-config", requireAuth, async (req, res) => {
+  const { data, error } = await supabase.from("restaurante_config").select(FRETE_CAMPOS).eq("restaurant_id", req.params.restaurant_id).maybeSingle();
+  if (error) return sendError(res, 500, "Não deu pra carregar o frete");
+  return res.json({ modo: data?.frete_modo === "km" ? "km" : "fixo", fixo: Number(data?.taxa_entrega) || 0, por_km: Number(data?.frete_km) || 0,
+    minimo: Number(data?.frete_minimo) || 0, rural_valor: Number(data?.frete_rural_valor) || 0, rural_lista: Array.isArray(data?.frete_rural_lista) ? data.frete_rural_lista : [] });
+});
+app.put("/api/v1/restaurante/:restaurant_id/frete-config", requireAuth, async (req, res) => {
+  const b = req.body || {};
+  const num = (v, max) => { const n = Number(String(v ?? 0).replace(",", ".")); return Number.isFinite(n) && n >= 0 && n <= max ? _r2(n) : null; };
+  const d = { frete_modo: b.modo === "km" ? "km" : "fixo", taxa_entrega: num(b.fixo, 500), frete_km: num(b.por_km, 50), frete_minimo: num(b.minimo, 500), frete_rural_valor: num(b.rural_valor, 1000),
+    frete_rural_lista: [...new Set((Array.isArray(b.rural_lista) ? b.rural_lista : []).map((s) => String(s || "").trim().slice(0, 60)).filter(Boolean))].slice(0, 100) };
+  if (Object.values(d).some((v) => v === null)) return sendError(res, 400, "Confira os valores do frete");
+  const { error } = await supabase.from("restaurante_config").update(d).eq("restaurant_id", req.params.restaurant_id);
+  if (error) return sendError(res, 500, "Não deu pra salvar o frete");
+  return res.json({ success: true });
+});
+// quanto fica o frete pra esse endereço (Novo pedido do Operacional)
+app.get("/api/v1/restaurante/:restaurant_id/frete", requireAuth, async (req, res) => {
+  try { return res.json(await calcularFrete(req.params.restaurant_id, String(req.query.endereco || "").slice(0, 300), { rural: req.query.rural === "1" })); }
+  catch (e) { console.error("❌ frete:", e.message); return sendError(res, 500, "Não deu pra calcular o frete"); }
+});
+
 function calcularDestino(origin) {
   const origensDeMesa = ["autoatendimento", "balcao", "mesa"];
   return origensDeMesa.includes(String(origin || "").toLowerCase()) ? "mesas" : "kanban";
@@ -3025,6 +3069,8 @@ app.post("/api/v1/pedidos", async (req, res) => {
     // 🆔 formato novo: itens por ID (nome e preço saem do cardápio, nunca do aparelho)
     let totalPorId = null;
   const doCaixa = readAuth(req)?.kind === "user"; // caixa logado (Operacional)
+  // frete do Novo pedido: o caixa viu o valor calculado e pode ajustar (retirada = 0)
+  const taxaCaixa = doCaixa && req.body && "taxa_entrega" in req.body ? Math.min(500, Math.max(0, _r2(Number(String(req.body.taxa_entrega).replace(",", ".")) || 0))) : null;
     // cancelar é só pelo botão de cancelar (motivo e PIN): editar o pedido não cancela
     if (order_id && ["cancelled", "canceled"].includes(String(status || ""))) return sendError(res, 400, "Para cancelar, use o botão Cancelar do pedido");
     if (normalizedItems.length && normalizedItems.every(i => i && i.item_id != null)) {
@@ -3110,13 +3156,14 @@ app.post("/api/v1/pedidos", async (req, res) => {
     }
     // por ID: o total é o do servidor; só o caixa logado pode mudar o total (desconto/ajuste no balcão)
     if (totalPorId !== null) total_price = doCaixa && total_price_cliente != null && total_price_cliente !== "" && Number(total_price_cliente) > 0
-      ? Number(total_price_cliente) : totalPorId;
+      ? Number(total_price_cliente) : _r2(totalPorId + (taxaCaixa || 0));
           // desconto no total (caixa cobrou menos que o cardápio): com PIN de quem autoriza, e fica registrado
     let descontoAut = null;
-    if (totalPorId !== null && doCaixa && Number(total_price) < totalPorId - 0.009) {
+    const _cheio = totalPorId !== null ? _r2(totalPorId + (taxaCaixa || 0)) : null; // itens + frete
+    if (totalPorId !== null && doCaixa && Number(total_price) < _cheio - 0.009) {
       const a = await autorizar(req, restaurant_id);
       if (a.erro) return res.status(a.status).json({ error: a.erro, codigo: a.codigo });
-      descontoAut = { funcionario: a.funcionario, valor: _r2(totalPorId - Number(total_price)), de: totalPorId, para: _r2(Number(total_price)) };
+      descontoAut = { funcionario: a.funcionario, valor: _r2(_cheio - Number(total_price)), de: _cheio, para: _r2(Number(total_price)) };
     }
     else if (totalPorId === null && publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0 && (ehDeliveryPublico || !order_id)) {
       const { total: totalServidor, naoEncontrados, divergentes } = await calcularTotalServidor(restaurant_id, normalizedItems);
@@ -3145,6 +3192,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
       taxa_entrega = Math.max(0, Number(cfgEnt?.taxa_entrega) || 0);
       total_price = Math.round((subtotal + taxa_entrega) * 100) / 100;
     }
+    if (!comTaxa && taxaCaixa !== null) taxa_entrega = taxaCaixa; // a fidelidade não conta o frete
 
     const now = new Date().toISOString();
     let resultData;
@@ -3162,6 +3210,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
   payment_method: payment_method || null,
   ...(funcionario_id !== undefined ? { funcionario_id } : {}),
   ...(comTaxa ? { taxa_entrega, agendado_para } : {}),
+  ...(!comTaxa && taxaCaixa !== null ? { taxa_entrega } : {}),
   update_at: now
 };
 
@@ -3202,6 +3251,7 @@ const nextNumber = numData || 1;
      ...(funcionario_id ? { funcionario_id } : {}),
     ...(chaveEnvio ? { chave_envio: chaveEnvio } : {}),
     ...(comTaxa ? { taxa_entrega, agendado_para } : {}),
+    ...(!comTaxa && taxaCaixa !== null ? { taxa_entrega } : {}),
       total_price: total_price || 0,
       origin: finalOrigin,
       destino: calcularDestino(finalOrigin),
@@ -6689,7 +6739,7 @@ lf();
       lineEq();
 
       b(ESC, 0x45, 0x01);
-      const tipoLabel = isDelivery ? '[DELIVERY]' : order.table_number ? `[LOCAL - MESA ${order.table_number}]` : '[LOCAL]';
+      const tipoLabel = isDelivery ? '[DELIVERY]' : String(order.service_type || '').toLowerCase() === 'retirada' ? '[RETIRADA]' : order.table_number ? `[LOCAL - MESA ${order.table_number}]` : '[LOCAL]';
       const pedidoStr = `Pedido #${order.order_number || ''}`;
       const espacoPedido = 48 - pedidoStr.length - tipoLabel.length;
       txt(pedidoStr + ' '.repeat(Math.max(1, espacoPedido)) + tipoLabel); lf();
@@ -11492,7 +11542,7 @@ app.get("/health", async (req, res) => {
 });
 
 // ===== ENTREGADORES (app do entregador, mapa ao vivo e acertos) — tudo no entregador.js =====
-registrarEntregador({ app, io, supabase, emitOrderUpdate, getIntegracao, readAuth, ALLOWED_ORIGINS_FIXED, PORT, OWNER_OTP_WEBHOOK_URL, OWNER_OTP_WEBHOOK_SECRET });
+registrarEntregador({ app, io, supabase, emitOrderUpdate, getIntegracao, readAuth, ALLOWED_ORIGINS_FIXED, PORT, OWNER_OTP_WEBHOOK_URL, OWNER_OTP_WEBHOOK_SECRET, temRecurso });
 // ===== ERROR HANDLER =====
 app.use((err, req, res, next) => {
   console.error("❌ Erro:", err);
