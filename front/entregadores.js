@@ -147,7 +147,7 @@
         <div class="ent-acerto-peds">${a.pedidos.map((p) => `<span>#${esc(p.numero)} · ${moeda(p.dinheiro)}</span>`).join("")}</div>
         ${a.troco_levado ? `<p class="ent-muted ent-dica">Ele levou ${moeda(a.troco_levado)} de troco. Se pegou esse troco aqui no caixa, devolve junto.</p>` : ""}
         <div class="ent-acerto-acao">
-          <label>Recebido <input type="text" inputmode="decimal" value="${String(a.dinheiro.toFixed(2)).replace(".", ",")}" aria-label="Valor recebido de ${esc(a.entregador.nome)}"></label>
+          <label>Recebido <input type="text" data-mask="moeda" inputmode="decimal" value="${String(a.dinheiro.toFixed(2)).replace(".", ",")}" aria-label="Valor recebido de ${esc(a.entregador.nome)}"></label>
           <button class="primary-button" type="button" data-acao="recebi">Recebi</button>
         </div>
       </div>`).join("");
@@ -279,13 +279,13 @@
       <h3>${novo ? "Novo entregador" : "Editar entregador"}</h3>
       <form id="ent-form" class="ent-form">
         <label>Nome<input name="nome" required maxlength="60" value="${esc(ent?.nome || "")}" placeholder="Ex.: João Pedro"></label>
-        <label>WhatsApp<input name="telefone" required inputmode="tel" value="${esc(tel)}" placeholder="(14) 99999-9999"></label>
+        <label>WhatsApp<input name="telefone" required inputmode="tel" data-mask="tel" value="${esc(tel)}" placeholder="(14) 99999-9999"></label>
         <fieldset class="ent-seg"><legend>Como ele recebe</legend>
           ${Object.entries(TIPO).map(([k, v]) => `<label><input type="radio" name="tipo_pagamento" value="${k}" ${((ent?.tipo_pagamento || "entrega") === k) ? "checked" : ""}><span>${v}</span></label>`).join("")}
         </fieldset>
-        <label id="ent-diaria-campo">Valor da diária por turno (R$)<input name="valor_diaria" inputmode="decimal" value="${ent?.valor_diaria ? String(ent.valor_diaria.toFixed(2)).replace(".", ",") : ""}" placeholder="Ex.: 50,00"></label>
+        <label id="ent-diaria-campo">Valor da diária por turno (R$)<input name="valor_diaria" inputmode="decimal" data-mask="moeda" value="${ent?.valor_diaria ? String(ent.valor_diaria.toFixed(2)).replace(".", ",") : ""}" placeholder="Ex.: 50,00"></label>
         <div id="ent-entrega-campo" style="display:grid;gap:12px">
-          <label><span id="ent-entrega-rotulo">Valor por entrega (R$)</span><input name="valor_entrega" inputmode="decimal" value="${ent?.valor_entrega ? String(ent.valor_entrega.toFixed(2)).replace(".", ",") : ""}" placeholder="Ex.: 5,00"></label>
+          <label><span id="ent-entrega-rotulo">Valor por entrega (R$)</span><input name="valor_entrega" inputmode="decimal" data-mask="moeda" value="${ent?.valor_entrega ? String(ent.valor_entrega.toFixed(2)).replace(".", ",") : ""}" placeholder="Ex.: 5,00"></label>
           <label class="ent-check"><input type="checkbox" name="entrega_por_km" ${ent?.entrega_por_km ? "checked" : ""}> Por distância (valor por km)</label>
         </div>
         <p class="ent-muted ent-dica">Por enquanto esse valor só fica anotado. O acerto ainda usa a taxa de entrega de cada pedido.</p>
@@ -390,7 +390,7 @@
       <label class="ent-switch"><input type="checkbox" id="ent-avisar" ${E.config.avisar_cliente ? "checked" : ""}><i aria-hidden="true"></i>
         <span><b>Avisar o cliente no WhatsApp</b><small>Quando o pedido sai, ele recebe o link do mapa pra acompanhar a entrega</small></span></label>
         <label class="ent-minimo"><span><b>Valor mínimo por entrega</b><small>Pra quem recebe por km: entrega pertinho nunca paga menos que isso</small></span>
-        <input type="text" inputmode="decimal" id="ent-minimo" value="${String((E.config.valor_minimo_entrega || 0).toFixed(2)).replace(".", ",")}" aria-label="Valor mínimo por entrega"></label>
+<input type="text" inputmode="decimal" data-mask="moeda" id="ent-minimo" value="${String((E.config.valor_minimo_entrega || 0).toFixed(2)).replace(".", ",")}" aria-label="Valor mínimo por entrega"></label>
       ${link ? `<div class="ent-link"><span>Link do app dos entregadores</span><div class="ent-link-linha"><b>${esc(link)}</b><button class="ghost-button small" type="button" id="ent-copiar">Copiar</button></div></div>` : ""}`;
     document.getElementById("ent-avisar").onchange = async (e) => {
       try { await api("/config", { method: "PATCH", body: { avisar_cliente: e.target.checked } }); E.config.avisar_cliente = e.target.checked; aviso("Salvo ✓"); }
