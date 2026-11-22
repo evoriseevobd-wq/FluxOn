@@ -953,7 +953,7 @@ function secOperacao(el) {
     <div class="bloco">
       <h3>Contato</h3>
       <div class="grade-2">
-        <label class="campo"><span>Telefone / WhatsApp</span><input id="f-telefone" inputmode="tel" value="${esc(c.telefone || "")}"></label>
+        <label class="campo"><span>Telefone / WhatsApp</span><input id="f-telefone" inputmode="tel" data-mask="tel" value="${esc(c.telefone || "")}"></label>
         <label class="campo"><span>Instagram</span><input id="f-instagram" value="${esc(c.instagram || "")}" placeholder="@restaurante"></label>
       </div>
       <label class="campo"><span>Endereço</span><input id="f-endereco" value="${esc(c.endereco || "")}" placeholder="Rua, número, bairro, cidade"></label>
@@ -963,8 +963,8 @@ function secOperacao(el) {
       <h3>Salão e delivery</h3>
       <div class="grade">
         <label class="campo"><span>Mesas no salão</span><input id="f-mesas" type="number" min="0" value="${esc(c.num_mesas ?? 10)}"></label>
-        <label class="campo"><span>Taxa de entrega (R$)</span><input id="f-taxa" type="number" min="0" step="0.01" value="${esc(c.taxa_entrega ?? 0)}"></label>
-        <label class="campo"><span>Pedido mínimo (R$)</span><input id="f-minimo" type="number" min="0" step="0.01" value="${esc(c.pedido_minimo ?? 0)}"></label>
+        <label class="campo"><span>Taxa de entrega (R$)</span><input id="f-taxa" data-mask="moeda" type="number" min="0" step="0.01" value="${esc(c.taxa_entrega ?? 0)}"></label>
+        <label class="campo"><span>Pedido mínimo (R$)</span><input id="f-minimo" data-mask="moeda" type="number" min="0" step="0.01" value="${esc(c.pedido_minimo ?? 0)}"></label>
         <label class="campo"><span>Entrega mais rápida (min)</span><input id="f-ent-min" type="number" min="0" value="${esc(c.tempo_entrega_min ?? "")}"></label>
         <label class="campo"><span>Entrega mais demorada (min)</span><input id="f-ent-max" type="number" min="0" value="${esc(c.tempo_entrega_max ?? "")}"></label>
       </div>
@@ -1131,8 +1131,8 @@ function janelaPessoa(o = null, { restauranteFixo = null, aoSalvar } = {}) {
     corpo: `
       <label class="campo"><span>Nome</span><input id="p-nome" value="${esc(o?.nome || "")}" autocomplete="off"></label>
       <div class="grade-2">
-        ${nova ? `<label class="campo"><span>CPF</span><input id="p-cpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off"></label>` : ""}
-        <label class="campo"><span>WhatsApp com DDD</span><input id="p-tel" inputmode="tel" placeholder="(14) 99999-9999" value="${esc(o ? fmtTel(o.telefone) : "")}" autocomplete="off"></label>
+        ${nova ? `<label class="campo"><span>CPF</span><input id="p-cpf" inputmode="numeric" data-mask="cpf" placeholder="000.000.000-00" autocomplete="off"></label>` : ""}
+        <label class="campo"><span>WhatsApp com DDD</span><input id="p-tel" inputmode="tel" data-mask="tel" placeholder="(14) 99999-9999" value="${esc(o ? fmtTel(o.telefone) : "")}" autocomplete="off"></label>
       </div>
       <div class="campo"><span>Restaurantes que ela acompanha</span>
         <div class="checklist">${S.restaurantes.map(r => `<label><input type="checkbox" value="${esc(r.id)}" ${marcados.has(r.id) ? "checked" : ""}>${esc(nomeRest(r))}<small>${esc((PLANOS.find(p => p[0] === r.plan) || ["", ""])[1])}</small></label>`).join("")}</div>
@@ -1141,8 +1141,6 @@ function janelaPessoa(o = null, { restauranteFixo = null, aoSalvar } = {}) {
     pe: `<p class="erro"></p><button type="button" class="btn" data-fechar-pe>Cancelar</button><button type="button" class="btn btn-pri" id="p-salvar">${nova ? "Cadastrar" : "Salvar"}</button>`
   });
   j.q("[data-fechar-pe]").onclick = j.fechar;
-  mascaraTel(j.q("#p-tel"));
-  if (nova) mascaraCpf(j.q("#p-cpf"));
   j.q("#p-salvar").onclick = () => ocupado(j.q("#p-salvar"), async () => {
     j.erro("");
     const nome = j.q("#p-nome").value.trim(), tel = so(j.q("#p-tel").value);
@@ -1280,10 +1278,9 @@ function janelaNovoRestaurante() {
       ? `<label class="campo"><span>Quem é o dono</span><select id="n-dono-id">${[...S.donos].sort((a, b) => a.nome.localeCompare(b.nome)).map(o => `<option value="${esc(o.id)}">${esc(o.nome)} · ${esc(fmtTel(o.telefone))}</option>`).join("")}</select></label>`
       : dono === "nova"
       ? `<div class="grade-2"><label class="campo"><span>Nome do dono</span><input id="n-p-nome" autocomplete="off"></label>
-           <label class="campo"><span>CPF</span><input id="n-p-cpf" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off"></label></div>
-         <label class="campo"><span>WhatsApp com DDD</span><input id="n-p-tel" inputmode="tel" placeholder="(14) 99999-9999" autocomplete="off"></label>`
+           <label class="campo"><span>CPF</span><input id="n-p-cpf" inputmode="numeric" data-mask="cpf" placeholder="000.000.000-00" autocomplete="off"></label></div>
+         <label class="campo"><span>WhatsApp com DDD</span><input id="n-p-tel" inputmode="tel" data-mask="tel" placeholder="(14) 99999-9999" autocomplete="off"></label>`
       : `<p class="dica">Dá pra cadastrar o dono depois, em Donos e acesso.</p>`;
-    if (dono === "nova") { mascaraCpf(j.q("#n-p-cpf")); mascaraTel(j.q("#n-p-tel")); }
   };
   campos();
   const seg = (sel, fn) => j.q(sel).onclick = (e) => {
@@ -1500,13 +1497,13 @@ function desenharRevisao(box) {
                   ${i.variacoes.map((v, vi) => `
                     <span class="variacao">
                       <input class="vn" data-var="${ci}:${ii}:${vi}" data-vc="nome" value="${esc(v.nome)}" placeholder="Tamanho">
-                      <input class="vp" data-var="${ci}:${ii}:${vi}" data-vc="preco" value="${esc(preco(v.preco))}" placeholder="0,00" inputmode="decimal">
+                      <input class="vp" data-var="${ci}:${ii}:${vi}" data-vc="preco" value="${esc(preco(v.preco))}" placeholder="0,00" inputmode="decimal" data-mask="moeda">
                       <button type="button" data-tirar-var="${ci}:${ii}:${vi}" aria-label="Tirar">${ico("x", "ico ico-sm")}</button>
                     </span>`).join("")}
                   <button type="button" class="add-var" data-add-var="${ci}:${ii}">+ tamanho</button>
                 </div>
               </div>
-              <div class="prefixo preco"><b>R$</b><input class="inp" data-campo="preco" data-i="${ci}:${ii}" value="${esc(preco(i.preco))}" inputmode="decimal" placeholder="0,00" style="text-align:right"></div>
+              <div class="prefixo preco"><b>R$</b><input class="inp" data-campo="preco" data-i="${ci}:${ii}" value="${esc(preco(i.preco))}" inputmode="decimal" data-mask="moeda" placeholder="0,00" style="text-align:right"></div>
               <button type="button" class="btn btn-ghost btn-icone rev-tirar" data-tirar-item="${ci}:${ii}" aria-label="Tirar item">${ico("lixo")}</button>
             </div>`).join("")}
         </div>`).join("")}
@@ -1885,7 +1882,7 @@ async function secReservas(el) {
         <div class="bloco">
           <label class="chave"><input type="checkbox" id="rs-ativo" ${d.ativo ? "checked" : ""}><i></i><span>Aceitar reservas de mesa</span></label>
           <div class="grade">
-            <label class="campo"><span>Valor no Pix (vira crédito)</span><input id="rs-valor" type="number" min="1" max="1000" step="1" value="${d.valor}"></label>
+            <label class="campo"><span>Valor no Pix (vira crédito)</span><input id="rs-valor" data-mask="moeda" type="number" min="1" max="1000" step="1" value="${d.valor}"></label>
             <label class="campo"><span>Duração da reserva</span>${sel("rs-duracao", d.opcoes.duracao, d.duracao, tempo)}</label>
             <label class="campo"><span>Mesa bloqueada antes</span>${sel("rs-bloqueio", d.opcoes.bloqueio, d.bloqueio, n => n ? tempo(n) + " antes" : "Não bloquear")}</label>
             <label class="campo"><span>Tolerância de atraso</span>${sel("rs-tolerancia", d.opcoes.tolerancia, d.tolerancia, tempo)}</label>
