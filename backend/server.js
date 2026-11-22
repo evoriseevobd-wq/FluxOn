@@ -24,7 +24,7 @@ dotenv.config();
 // (não gasta nada no Upstash). Com REDIS_URL: vários servidores — tudo isso passa pelo Redis.
 const REDIS_ON = !!process.env.REDIS_URL;
 const redisOpts = {
-  tls: { rejectUnauthorized: false },
+  ...(String(process.env.REDIS_URL || "").startsWith("rediss://") ? { tls: { rejectUnauthorized: false } } : {}), // TLS só no Upstash (rediss://); Redis próprio no EasyPanel é rede interna
   lazyConnect: true,
   connectTimeout: 10000,
   retryStrategy: (times) => Math.min(times * 500, 5000)
@@ -6996,7 +6996,7 @@ const printWorker = new Worker("impressao", async (job) => {
 }, { 
   connection: redisConnection,
   concurrency: 3,
-  stalledInterval: 21600000,
+  stalledInterval: 45000,
   lockDuration: 300000
 });
 
