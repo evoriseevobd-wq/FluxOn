@@ -3706,3 +3706,16 @@ input.adc-obs:focus { border-bottom: 1px solid rgba(249,115,115,0.7) !important;
 }
 @media (prefers-reduced-motion: reduce) { .pulso-salvo { animation: pulsoSalvoCalmo 2s linear forwards; } }
 @keyframes pulsoSalvoCalmo { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+
+
+/* ===== 🔐 Pedido da mesa esperando o aceite do atendente ===== */
+.aceite-barra { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 9000; width: min(560px, calc(100vw - 32px)); box-sizing: border-box; background: #140b0b; border: 1px solid rgba(249,115,115,0.55); border-radius: 16px; padding: 14px 16px; box-shadow: 0 18px 50px rgba(0,0,0,0.6); display: grid; gap: 10px; animation: aceitePulso 2s ease-in-out infinite; }
+.aceite-titulo { font-size: 12px; font-weight: 800; color: #f87171; }
+.aceite-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.aceite-info { font-size: 13.5px; color: rgba(252,228,228,0.9); }
+.aceite-botoes { display: flex; gap: 8px; }
+.aceite-botoes button { padding: 8px 14px; font-size: 13px; }
+.aceite-mais { font-size: 12px; color: rgba(252,228,228,0.55); }
+@keyframes aceitePulso { 0%, 100% { box-shadow: 0 18px 50px rgba(0,0,0,0.6), 0 0 0 0 rgba(249,115,115,0.35); } 50% { box-shadow: 0 18px 50px rgba(0,0,0,0.6), 0 0 0 8px rgba(249,115,115,0); } }
+@media (prefers-reduced-motion: reduce) { .aceite-barra { animation: none; } }
+
