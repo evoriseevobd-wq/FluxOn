@@ -3721,7 +3721,7 @@ input.adc-obs:focus { border-bottom: 1px solid rgba(249,115,115,0.7) !important;
 
 
 /* ===== 🖨️ Comanda que não imprimiu ===== */
-.fila-imp { position: fixed; top: 76px; right: 16px; z-index: 8990; width: min(420px, calc(100vw - 32px)); display: grid; gap: 8px; }
+.fila-imp { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 8990; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 120px); overflow-y: auto; display: grid; gap: 10px; }
 .fila-imp-item { display: grid; gap: 10px; padding: 12px 14px; border-radius: 14px; background: #121212; border: 1px solid rgba(255,255,255,0.14); color: rgba(252,228,228,0.9); font-size: 13px; box-shadow: 0 14px 40px rgba(0,0,0,0.55); }
 .fila-imp-item.erro { border-color: rgba(249,115,115,0.6); background: #140b0b; }
 .fila-imp-botoes { display: flex; gap: 8px; justify-content: flex-end; }
