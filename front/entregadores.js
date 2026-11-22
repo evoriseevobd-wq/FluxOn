@@ -233,6 +233,8 @@
         </div>
         <div class="ent-item-acoes">
           ${e.ativo && !e.turno_aberto ? `<button class="ghost-button small ent-abrir" type="button" data-acao="abrir-turno">Abrir turno</button>` : ""}
+      ${e.ativo ? `<button class="ghost-button small" type="button" data-acao="codigo" title="Código pra entrar no app">🔑 Código</button>` : ""}
+          <button class="ghost-button small" type="button" data-acao="editar">Editar</button>
         </div>
       </div>`;
     }).join("");
