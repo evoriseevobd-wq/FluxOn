@@ -10104,3 +10104,47 @@ setTimeout(aceiteCarregarConfig, 1500);
 setInterval(aceiteCarregarConfig, 5 * 60000);
 
 
+/* ========================================
+   🖨️ COMANDA QUE NÃO IMPRIMIU
+   O servidor tenta de novo sozinho por ~1 hora. Aqui o caixa vê o que está esperando e,
+   se não deu, toca "Imprimir de novo" (ou "Já resolvi" se imprimiu de outro jeito).
+======================================== */
+const _filaImp = new Map(); // id → { order_number, status }
+function filaImpDesenhar() {
+  let box = document.getElementById("fila-impressao");
+  if (!_filaImp.size) { box?.remove(); return; }
+  if (!box) { box = document.createElement("div"); box.id = "fila-impressao"; box.className = "fila-imp"; box.setAttribute("role", "status"); document.body.appendChild(box); }
+  box.innerHTML = [..._filaImp].map(([id, j]) => j.status === "falhou"
+    ? `<div class="fila-imp-item erro"><span>⚠️ A comanda do pedido <b>#${escapeHtml(j.order_number)}</b> não imprimiu.</span>
+        <span class="fila-imp-botoes"><button type="button" class="ghost-button" data-fila-desc="${escapeHtml(String(id))}">Já resolvi</button><button type="button" class="primary-button" data-fila-reenv="${escapeHtml(String(id))}">Imprimir de novo</button></span></div>`
+    : `<div class="fila-imp-item"><span>🖨️ A comanda do pedido <b>#${escapeHtml(j.order_number)}</b> não saiu. Tentando de novo sozinho...</span></div>`).join("");
+}
+async function filaImpCarregar() {
+  try {
+    const r = await fetch(`${API_BASE}/api/v1/restaurante/${getRestaurantId()}/impressora/fila`, { headers: buildHeaders() });
+    if (!r.ok) return;
+    _filaImp.clear();
+    for (const j of await r.json()) _filaImp.set(String(j.id), { order_number: j.order_number, status: j.status });
+    filaImpDesenhar();
+  } catch {}
+}
+document.addEventListener("click", async (e) => {
+  const re = e.target.closest("[data-fila-reenv]"), de = e.target.closest("[data-fila-desc]");
+  if (!re && !de) return;
+  const id = (re || de).dataset.filaReenv || (re || de).dataset.filaDesc;
+  (re || de).disabled = true;
+  const r = await fetch(`${API_BASE}/api/v1/restaurante/${getRestaurantId()}/impressora/fila/${encodeURIComponent(id)}/${re ? "reenviar" : "descartar"}`, { method: "POST", headers: buildHeaders() }).catch(() => null);
+  if (re && r?.ok) _filaImp.set(id, { ..._filaImp.get(id), status: "pendente" }); else _filaImp.delete(id);
+  filaImpDesenhar();
+});
+if (socket) socket.on("impressao_fila", (j) => {
+  if (!j?.id) return;
+  const id = String(j.id);
+  if (j.status === "impresso") _filaImp.delete(id); else _filaImp.set(id, { order_number: j.order_number, status: j.status });
+  filaImpDesenhar();
+  if (j.status === "falhou") alertaTocar();
+});
+setTimeout(filaImpCarregar, 2000);
+setInterval(filaImpCarregar, 60000); // garantia se o tempo real cair
+
+
