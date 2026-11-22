@@ -389,7 +389,7 @@
       <h3>Configurações</h3>
       <label class="ent-switch"><input type="checkbox" id="ent-avisar" ${E.config.avisar_cliente ? "checked" : ""}><i aria-hidden="true"></i>
         <span><b>Avisar o cliente no WhatsApp</b><small>Quando o pedido sai, ele recebe o link do mapa pra acompanhar a entrega</small></span></label>
-        <label class="ent-minimo"><span><b>Valor mínimo por entrega</b><small>Pra quem recebe por km: entrega pertinho nunca paga menos que isso</small></span>
+        <label class="ent-minimo"><span><b>Mínimo pago ao entregador por km</b><small>Pra quem recebe por km: entrega pertinho nunca paga menos que isso ao entregador</small></span>
 <input type="text" inputmode="decimal" data-mask="moeda" id="ent-minimo" value="${String((E.config.valor_minimo_entrega || 0).toFixed(2)).replace(".", ",")}" aria-label="Valor mínimo por entrega"></label>
       ${link ? `<div class="ent-link"><span>Link do app dos entregadores</span><div class="ent-link-linha"><b>${esc(link)}</b><button class="ghost-button small" type="button" id="ent-copiar">Copiar</button></div></div>` : ""}`;
     document.getElementById("ent-avisar").onchange = async (e) => {
@@ -423,6 +423,14 @@
   async function desenharMapa() {
     const el = document.getElementById("ent-mapa");
     if (!el || !visivel()) return;
+    // mapa ao vivo: do Advanced pra cima (no Essential aparece o aviso quando alguém está na rua)
+    if (window.temNoPlano && !window.temNoPlano("mapa_entregador")) {
+      const naRua = E.lista.some((e) => e.ativo && e.na_rua.length);
+      el.hidden = !naRua;
+      el.className = "ent-mapa ent-mapa-trava";
+      el.innerHTML = `<span>🔒 <b>Mapa ao vivo dos entregadores</b> · veja onde cada um está agora. Disponível no plano Advanced.</span>`;
+      return;
+    }
     const comPos = E.lista.filter((e) => e.ativo && e.posicao && e.na_rua.length);
     el.hidden = !comPos.length;
     if (!comPos.length) return;
