@@ -2575,6 +2575,8 @@ app.patch("/api/v1/pedidos/:id/adicionar-itens", requireRowOwner("orders"), asyn
 
     // 🔁 mesmo envio repetido: não soma os itens de novo
     const chaveEnvio = chaveEnvioValida(req.body?.chave_envio);
+    const jaAplicada = (p) => chaveEnvio && Array.isArray(p?.chaves_envio) && p.chaves_envio.includes(chaveEnvio);
+    if (jaAplicada(pedidoAtual)) return res.json({ success: true, repetido: true, order: pedidoAtual });
     // 🔐 cardápio da mesa (sem login): só com a sessão do QR, e só no pedido aberto da mesa dela
     let sessaoMesa = null;
     if (!readAuth(req)) {
@@ -2663,6 +2665,7 @@ console.log(`🖨️ Job de impressão adicionado — Pedido #${pedidoAtualizado
     }
 
     if (sessaoMesa) marcarSessaoMesa(sessaoMesa.token);
+    return res.json({ success: true, order: pedidoAtualizado });
   } catch (err) {
     return sendError(res, 500, "Erro interno ao adicionar itens");
   }
