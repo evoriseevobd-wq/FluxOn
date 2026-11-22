@@ -1096,7 +1096,7 @@ for (let i = 1; i <= numMesas; i++) mesas.push({ tipo: "mesa", numero: i });
   timerEl.textContent = "✅";
   timerEl.style.color = "rgba(34,197,94,1)";
   const currentOrder = orders.find(x => x.id === o.id);
-  if (currentOrder && currentOrder._frontStatus === "recebido") {
+  if (currentOrder && currentOrder._frontStatus === "recebido" && !aceitePendente(currentOrder)) { // esperando o Aceitar: não vai sozinho
     updateOrderStatus(o.id, 'preparo');
   }
   return;
@@ -10050,3 +10050,57 @@ window.adcLinhasPedido = (it) => {
   const o = String(it?.obs || "").trim() ? `<small style="display:block; font-size:12px; font-weight:800; color:#fbbf24;">» ${escapeHtml(it.obs)}</small>` : "";
   return a + o;
 };
+
+
+/* ========================================
+   🔐 ATENDENTE CONFIRMA OS PEDIDOS DA MESA (o dono liga no Owner)
+   Ligado: o pedido que chega pelo QR fica em "Recebido" e NÃO vai sozinho pra cozinha.
+   Toca a cada 10 segundos até alguém tocar Aceitar (vai pra cozinha) ou Recusar (cancela).
+   O que o cliente acrescenta depois num pedido já aceito entra direto.
+======================================== */
+window._mesaAceite = false;
+const aceitePendente = (o) => window._mesaAceite && o?._frontStatus === "recebido" && String(o.origin || "").toLowerCase() === "autoatendimento";
+async function aceiteCarregarConfig() {
+  try {
+    const d = await fetch(`${API_BASE}/api/v1/restaurante/${getRestaurantId()}/config`).then(r => r.json());
+    window._mesaAceite = !!d?.mesa_aceite;
+  } catch {}
+  aceiteDesenhar();
+}
+function aceiteDesenhar() {
+  const pend = (typeof orders !== "undefined" ? orders : []).filter(aceitePendente)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  let barra = document.getElementById("aceite-barra");
+  if (!pend.length) { barra?.remove(); return; }
+  if (!barra) {
+    barra = document.createElement("div");
+    barra.id = "aceite-barra"; barra.className = "aceite-barra"; barra.setAttribute("role", "alert");
+    document.body.appendChild(barra);
+  }
+  barra.innerHTML = `<div class="aceite-titulo">${pend.length === 1 ? "Pedido da mesa esperando o seu aceite" : `${pend.length} pedidos da mesa esperando o seu aceite`}</div>
+    ${pend.slice(0, 4).map(o => {
+      const itens = (o.itens || []).reduce((t, i) => t + (Number(i.qty ?? i.quantidade) || 1), 0);
+      return `<div class="aceite-linha">
+        <span class="aceite-info"><b>Mesa ${escapeHtml(String(o.table_number ?? "—"))}</b> · ${escapeHtml(o.client_name || "Cliente")} · ${itens} ${itens === 1 ? "item" : "itens"} · ${formatCurrency(Number(o.total_price) || 0)}</span>
+        <span class="aceite-botoes"><button type="button" class="ghost-button" data-aceite-recusar="${escapeHtml(o.id)}">Recusar</button><button type="button" class="primary-button" data-aceite-ok="${escapeHtml(o.id)}">Aceitar</button></span>
+      </div>`;
+    }).join("")}${pend.length > 4 ? `<div class="aceite-mais">+ ${pend.length - 4} na tela de Mesas</div>` : ""}`;
+}
+document.addEventListener("click", async (e) => {
+  const ok = e.target.closest("[data-aceite-ok]"), nao = e.target.closest("[data-aceite-recusar]");
+  if (!ok && !nao) return;
+  const b = ok || nao; b.disabled = true;
+  await updateOrderStatus(ok ? ok.dataset.aceiteOk : nao.dataset.aceiteRecusar, ok ? "preparo" : "cancelado");
+  aceiteDesenhar();
+  if (!document.getElementById("mesas-view")?.classList.contains("hidden")) renderMesas();
+});
+// toca a cada 10 segundos enquanto tiver pedido esperando
+setInterval(() => { aceiteDesenhar(); if ((typeof orders !== "undefined" ? orders : []).some(aceitePendente)) alertaTocar(); }, 10000);
+if (socket) {
+  socket.on("order_updated", () => setTimeout(aceiteDesenhar, 50));
+  socket.on("config_mesa", (c) => { window._mesaAceite = !!c?.mesa_aceite; aceiteDesenhar(); });
+}
+setTimeout(aceiteCarregarConfig, 1500);
+setInterval(aceiteCarregarConfig, 5 * 60000);
+
+
