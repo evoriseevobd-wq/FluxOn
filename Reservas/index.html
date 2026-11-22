@@ -46,7 +46,7 @@
     <h2><span>5</span> Seus dados</h2>
     <div class="vp-campos">
       <label>Nome e sobrenome<input id="nomeCliente" maxlength="80" autocomplete="name" placeholder="Ex.: Matheus Santos"></label>
-      <label>Seu WhatsApp<input id="telCliente" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
+      <label>Seu WhatsApp<input id="telCliente" inputmode="tel" data-mask="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
       <label>Observação (opcional)<textarea id="observacao" maxlength="200" rows="2" placeholder="Ex.: aniversário, cadeirinha de bebê..."></textarea></label>
     </div>
 
@@ -84,6 +84,7 @@
 
 <div class="aviso" id="aviso" hidden></div>
 
-<script src="script.js"></script>
+<script src="mascaras.js"></script>
+<script src="script.js?v=2"></script>
 </body>
 </html>
