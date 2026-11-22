@@ -690,12 +690,12 @@ let modoAdicao = false;
       return true;
     }
 
-    function showSessionExpired() {
-      // Esconde tudo
+    function showSessionExpired(texto) {
       document.getElementById('loading-state').style.display = 'none';
       document.getElementById('cat-nav-wrap').style.display = 'none';
-
+      document.getElementById('tela-expirou')?.remove();
       const el = document.createElement('div');
+      el.id = 'tela-expirou';
       el.style.cssText = `
         position: fixed; inset: 0; background: var(--cream);
         display: flex; flex-direction: column;
@@ -703,18 +703,57 @@ let modoAdicao = false;
         gap: 16px; padding: 40px; text-align: center; z-index: 9999;
       `;
       el.innerHTML = `
-        <div style="font-size:52px">📵</div>
+        <div style="font-size:52px">📷</div>
         <div style="font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:700;color:var(--ink)">
-          Sessão expirada
+          Esta página expirou
         </div>
-        <p style="font-size:14px;color:var(--muted);max-width:260px;line-height:1.65;font-weight:300">
-          Sua sessão de 2 horas encerrou.<br>
-          Escaneie o QR code da mesa novamente para fazer um novo pedido.
-        </p>
         <div style="width:40px;height:1px;background:var(--border-dk)"></div>
-        <div style="font-size:32px;animation:bob 1.5s ease infinite">📷</div>
+        <p style="font-size:14px;color:var(--muted);max-width:270px;line-height:1.65;font-weight:300">
+          ${escHtml(texto || 'Leia o QR Code da mesa novamente para continuar pedindo.')}
+        </p>
       `;
       document.body.appendChild(el);
+    }
+
+    /* ── 🔐 SESSÃO DA MESA ──
+       O QR impresso traz o código da mesa (?m=). O servidor troca por uma sessão só deste celular
+       e o link vira ?s=SESSAO (descartável). Ela morre quando a conta fecha ou depois de 1h sem pedido. */
+    const SESSAO_MESA_KEY = 'fx_sessao_mesa';
+    let sessaoMesa = null;
+    const limparSessaoMesa = () => { try { localStorage.removeItem(SESSAO_MESA_KEY); } catch {} };
+    async function abrirSessaoMesa(codigo, tokenLink, mesaAntiga) {
+      let guardada = null;
+      try { guardada = JSON.parse(localStorage.getItem(SESSAO_MESA_KEY) || 'null'); } catch {}
+      if (codigo) {
+        const r = await fetch(`${API_BASE}/api/v1/mesa/entrar`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ restaurant_id: restaurantId, codigo }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { limparSessaoMesa(); showSessionExpired(d.error || 'Este QR Code não vale mais. Chame o garçom.'); return false; }
+        sessaoMesa = d.token; mesaNum = String(d.mesa);
+        localStorage.setItem(SESSION_KEY, Date.now().toString()); // mostra a dica da busca na primeira vez
+      } else {
+        const token = tokenLink || (guardada?.rid === restaurantId ? guardada.token : null);
+        if (!token) {
+          if (mesaAntiga) { showSessionExpired('Este QR Code é antigo. Chame o garçom para fazer o seu pedido.'); return false; }
+          return true; // sem mesa: o cardápio só pra ver
+        }
+        const r = await fetch(`${API_BASE}/api/v1/mesa/sessao/${encodeURIComponent(token)}?restaurant_id=${encodeURIComponent(restaurantId)}`);
+        if (!r.ok) { limparSessaoMesa(); showSessionExpired(); return false; }
+        const d = await r.json();
+        sessaoMesa = token; mesaNum = String(d.mesa);
+      }
+      try { localStorage.setItem(SESSAO_MESA_KEY, JSON.stringify({ token: sessaoMesa, rid: restaurantId })); } catch {}
+      history.replaceState(history.state, '', `${location.pathname}?s=${encodeURIComponent(sessaoMesa)}`); // o link do QR some da barra
+      document.getElementById('mesa-pill').classList.add('visible');
+      document.getElementById('mesa-num').textContent = mesaNum;
+      return true;
+    }
+    // o servidor disse que a página expirou (conta fechada ou 1h sem pedido)
+    function sessaoExpirou(d) {
+      if (d?.codigo !== 'SESSAO_MESA') return false;
+      limparSessaoMesa(); limparPendente();
+      showSessionExpired();
+      return true;
     }
 
     // ═══════════════════════════════
@@ -813,18 +852,6 @@ function showToast() {
     // ═══════════════════════════════
    async function init() {
   const params = new URLSearchParams(window.location.search);
-  mesaNum = params.get('mesa') || null;
-
-  if (mesaNum) {
-    localStorage.setItem(SESSION_KEY, Date.now().toString());
-  }
-
-  if (!checkSession()) return;
-
-  if (mesaNum) {
-    document.getElementById('mesa-pill').classList.add('visible');
-    document.getElementById('mesa-num').textContent = mesaNum;
-  }
 
   try {
     const dominio = window.location.hostname;
@@ -843,6 +870,7 @@ function showToast() {
     const data = await resp.json();
     console.log('✅ restaurant_id:', data.restaurant_id);
     restaurantId = data.restaurant_id;
+  if (!(await abrirSessaoMesa(params.get('m'), params.get('s'), params.get('mesa')))) return;
 
     await loadRestaurant();
 await loadCategorias();
@@ -1261,6 +1289,7 @@ async function submitOrder() {
       const phone = document.getElementById('input-phone').value.trim();
       const notes = document.getElementById('input-notes').value.trim();
       if (!name) { alert('Por favor, informe seu nome.'); document.getElementById('input-name').focus(); return; }
+    if (!sessaoMesa) { showSessionExpired('Para fazer o pedido, leia o QR Code da sua mesa.'); return; }
       const cartItems = Object.values(cart);
       // contrato único: só os ids e a quantidade (nome e preço saem do cardápio no servidor)
       const itensNovos = cartItems.map(c => ({
@@ -1282,12 +1311,14 @@ async function submitOrder() {
           resp = await enviarMesa(`${API_BASE}/api/v1/pedidos/${pedidoAtivo.id}/adicionar-itens`, 'PATCH', {
               itens_novos: itensNovos,
               chave_envio: chaveEnvioMesa,
+          sessao_mesa: sessaoMesa,
               total_adicional: totalNovo,
               client_name: name,
               client_phone: phone || null,
               notes: notes || null
           });
           data = await resp.json();
+      if (sessaoExpirou(data)) return;
           if (!resp.ok) throw new Error(data.error || 'Erro ao adicionar itens');
           closeCheckout();
           showSuccess(data.order?.order_number);
@@ -1295,6 +1326,7 @@ async function submitOrder() {
           resp = await enviarMesa(`${API_BASE}/api/v1/pedidos`, 'POST', {
               restaurant_id: restaurantId,
               chave_envio: chaveEnvioMesa,
+             sessao_mesa: sessaoMesa,
               client_name: name,
               client_phone: phone || null,
               itens: itensNovos,
@@ -1305,6 +1337,7 @@ async function submitOrder() {
               notes: notes || null
           });
           data = await resp.json();
+          if (sessaoExpirou(data)) return;
           if (!resp.ok) throw new Error(data.error || 'Erro ao criar pedido');
           closeCheckout();
           showSuccess(data.order?.order_number);
@@ -1389,6 +1422,7 @@ async function submitOrder() {
         const resp = await enviarMesa(p.url, p.method, p.corpo, false);
         const data = await resp.json().catch(() => ({}));
         if (resp.ok) showSuccess(data.order?.order_number);
+        else sessaoExpirou(data);
       } catch (e) { console.warn('Reenvio do pedido:', e.message); }
     }
     
@@ -1839,7 +1873,9 @@ async function checkPedidoAtivo() {
   if (!mesaNum || !restaurantId) return;
   try {
     const resp = await fetch(`${API_BASE}/api/v1/pedidos-mesa?restaurant_id=${restaurantId}&mesa=${mesaNum}`);
+    const resp = await fetch(`${API_BASE}/api/v1/pedidos-mesa?restaurant_id=${restaurantId}&sessao=${encodeURIComponent(sessaoMesa || '')}`);
     const data = await resp.json();
+    if (data.expirada) return sessaoExpirou({ codigo: 'SESSAO_MESA' });
     if (data.pedido) {
       pedidoAtivo = data.pedido;
       openDrawerMesaOcupada(pedidoAtivo);
