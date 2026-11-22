@@ -203,8 +203,12 @@ const rastreio = (() => {
     const d = R.dados.get(R.atual);
     if (!d) return;
     const e = etapa(d), ativos = ativosEmOrdem();
-    const passos = [["Recebido", d.pedido.recebido_em], ["Preparando", d.pedido.preparo_em], ["Pronto", d.pedido.pronto_em]];
-    if (d.pedido.delivery) passos.push(["A caminho", d.pedido.saiu_em], ["Entregue", d.pedido.entregue_em]);
+    const semMapa = d.restaurante?.mapa === false; // Essential: no lugar do mapa, a linha do tempo com o horário de cada etapa
+    document.getElementById("rtTela").classList.toggle("sem-mapa", semMapa);
+    const passos = semMapa
+      ? [["Pedido recebido", d.pedido.recebido_em], ["Em preparo", d.pedido.preparo_em], [d.pedido.delivery ? "Pronto" : "Pronto para retirar", d.pedido.pronto_em]]
+      : [["Recebido", d.pedido.recebido_em], ["Preparando", d.pedido.preparo_em], ["Pronto", d.pedido.pronto_em]];
+    if (d.pedido.delivery) passos.push([semMapa ? "Enviado para entrega" : "A caminho", d.pedido.saiu_em], ["Entregue", d.pedido.entregue_em]);
     const tel = String(d.restaurante.telefone || "").replace(/\D/g, "");
     const itens = (d.pedido.itens || []).map((i) => `${i.qtd}× ${esc(i.nome)}`).join(" · ");
     document.getElementById("rtCard").innerHTML = `
@@ -212,22 +216,22 @@ const rastreio = (() => {
       <div class="rt-num">Pedido #${esc(d.pedido.numero)} · ${esc(d.restaurante.nome)}</div>
       <h2 class="rt-titulo">${esc(e.titulo)}</h2>
       <p class="rt-sub" id="rtSub">${esc(e.sub)}</p>
-      ${e.n >= 0 ? `<ol class="rt-passos" style="--n:${passos.length}">${passos.map(([nome, quando], i) => {
+      ${e.n >= 0 ? `<ol class="rt-passos${semMapa ? " rt-linha" : ""}" style="--n:${passos.length}">${passos.map(([nome, quando], i) => {
         const cls = i + 1 < e.n || e.n === 5 ? "feito" : i + 1 === e.n ? "agora" : "";
-        return `<li class="${cls}"><i></i><b>${nome}</b><small>${cls && quando ? hora(quando) : ""}</small></li>`;
+        return `<li class="${cls}"><i></i><b>${nome}</b><small>${cls && quando ? hora(quando) : semMapa ? "—" : ""}</small></li>`;
       }).join("")}</ol>` : ""}
       <div class="rt-acoes">
         ${tel.length >= 10 ? `<a class="rt-btn" href="tel:${tel}">📞 Ligar pra loja</a>` : ""}
         ${itens ? `<button type="button" class="rt-btn" id="rtItensBtn">🧾 Ver o pedido</button>` : ""}
       </div>
       <p class="rt-itens" id="rtItens" hidden>${itens} · <b>${money(d.pedido.total)}</b></p>
-      ${d.pedido.delivery && emAndamento(d) && d.destino?.fonte !== "cliente" && "geolocation" in navigator ? `
+      ${!semMapa && d.pedido.delivery && emAndamento(d) && d.destino?.fonte !== "cliente" && "geolocation" in navigator ? `
       <button type="button" class="rt-casa" id="rtCasa">📍 Estou em casa: marcar no mapa<small>O entregador chega direto na sua porta</small></button>` : ""}`;
     document.getElementById("rtCasa")?.addEventListener("click", marcarCasa);
     document.querySelectorAll("#rtCard [data-rt]").forEach((b) => b.onclick = () => abrir(b.dataset.rt));
     const ib = document.getElementById("rtItensBtn");
     if (ib) ib.onclick = () => { const p = document.getElementById("rtItens"); p.hidden = !p.hidden; };
-    desenharMapa();
+    if (!semMapa) desenharMapa();
     faixa();
   }
 
@@ -249,7 +253,7 @@ const rastreio = (() => {
 
   /* ---------- mapa (OpenStreetMap) ---------- */
   function iniciarMapa() {
-    if (R.mapa || !window.L) return;
+    if (R.mapa || !window.L || R.dados.get(R.atual)?.restaurante?.mapa === false) return; // Essential: sem mapa
     R.mapa = L.map("rtMapa", { zoomControl: false }).setView([-22.6, -48.8], 15);
     R.mapa.attributionControl.setPrefix(false);
     R.base = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(R.mapa);
