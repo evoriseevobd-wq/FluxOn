@@ -1702,37 +1702,11 @@ padding:0;
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="script.js?v=8"></script>
-  <script src="entregadores.js?v=2"></script>
+  <script src="mascaras.js"></script>
+  <script src="script.js?v=9"></script>
+  <script src="entregadores.js?v=3"></script>
   <script src="configuracoes.js"></script>
   <script src="rodizio.js"></script>
-<script>
-  document.getElementById('new-phone').addEventListener('input', function(e) {
-    const input = e.target;
-    const digitsBeforeCursor = input.value.slice(0, input.selectionStart).replace(/\D/g, '').length;
-
-    const digits = input.value.replace(/\D/g, '').slice(0, 11);
-    let v = digits;
-    if (digits.length > 6) {
-      v = digits.slice(0,2) + ' ' + digits.slice(2,7) + '-' + digits.slice(7);
-    } else if (digits.length > 2) {
-      v = digits.slice(0,2) + ' ' + digits.slice(2);
-    }
-    input.value = v;
-
-    // Recoloca o cursor na posição certa, contando só dígitos
-    let pos = v.length, count = 0;
-    if (digitsBeforeCursor === 0) {
-      pos = 0;
-    } else {
-      for (let i = 0; i < v.length; i++) {
-        if (/\d/.test(v[i])) count++;
-        if (count === digitsBeforeCursor) { pos = i + 1; break; }
-      }
-    }
-    input.setSelectionRange(pos, pos);
-  });
-</script>
 
   <button id="fab-instalar" class="fab-instalar hidden" type="button" aria-label="Instalar o FluxON neste computador">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/></svg>
