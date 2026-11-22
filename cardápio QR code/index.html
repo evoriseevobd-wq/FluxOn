@@ -1872,7 +1872,6 @@ function carrosselAnterior() {
 async function checkPedidoAtivo() {
   if (!mesaNum || !restaurantId) return;
   try {
-    const resp = await fetch(`${API_BASE}/api/v1/pedidos-mesa?restaurant_id=${restaurantId}&mesa=${mesaNum}`);
     const resp = await fetch(`${API_BASE}/api/v1/pedidos-mesa?restaurant_id=${restaurantId}&sessao=${encodeURIComponent(sessaoMesa || '')}`);
     const data = await resp.json();
     if (data.expirada) return sessaoExpirou({ codigo: 'SESSAO_MESA' });
