@@ -6508,10 +6508,10 @@ async function initAutoatendimento() {
   setupAutoatendimentoTabs();
   document.getElementById("painel-mesas")?.classList.remove("hidden");
 
-  // 🔥 ADICIONE ISTO:
-  const dominioSalvo = localStorage.getItem("cardapio_url") || "";
-const el = document.getElementById("input-dominio-cardapio");
-if (el) el.value = dominioSalvo;
+  carregarQrMesas().then(() => { // o domínio vem do servidor (vale em qualquer computador)
+    const el = document.getElementById("input-dominio-cardapio");
+    if (el) el.value = _qrMesas?.dominio || localStorage.getItem("cardapio_url") || "";
+  });
 }
 
 function setupAutoatendimentoTabs() {
@@ -7659,7 +7659,7 @@ function salvarDominio() {
     method: "PATCH",
     headers: buildHeaders(),
     body: JSON.stringify({ dominio: hostname })
-  });
+  }).then(() => carregarQrMesas());
 
   document.getElementById("dominio-popover").style.display = "none";
   const btn = document.getElementById("btn-config-dominio");
@@ -8553,100 +8553,168 @@ async function exportarFechamentoPDF() {
     }
   }
 }
-// ---------- PONTO DE ENTRADA PÚBLICO ----------
-// Chame showCaixa() onde antes você chamava showResumoDia()
-// Se o caixa estiver fechado, abre a tela de abertura automaticamente.
-// Se estiver aberto, mostra o painel completo.
 
-function gerarQrCodes() {
-  const qtd = parseInt(document.getElementById("input-mesas").value) || 10;
+/* ========================================
+   🔐 QR DAS MESAS (salvos no servidor)
+   O QR impresso é sempre o que aparece aqui: cada mesa tem um código aleatório (?m=CODIGO).
+   Só muda quando alguém clica em "Trocar QR" (uma mesa) ou "Gerar QRs novos" (todas).
+   O QR é desenhado aqui mesmo (o link da mesa não vai pra nenhum site de fora).
+======================================== */
+let _qrMesas = null; // { dominio, num_mesas, mesas: [{ mesa, codigo, ocupada }] }
+const qrLinkMesa = (m) => `https://${String(_qrMesas?.dominio || "").replace(/^https?:\/\//, "").replace(/\/$/, "")}/?m=${m.codigo}`;
+function qrPng(texto, px = 600) {
+  if (typeof qrcode !== "function") return "";
+  const q = qrcode(0, "M"); q.addData(texto); q.make();
+  const n = q.getModuleCount(), borda = 4, cel = Math.max(1, Math.floor(px / (n + borda * 2))), lado = cel * (n + borda * 2);
+  const c = document.createElement("canvas"); c.width = c.height = lado;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, lado, lado); g.fillStyle = "#000";
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) g.fillRect((k + borda) * cel, (r + borda) * cel, cel, cel);
+  return c.toDataURL("image/png");
+}
+async function qrMesasApi(caminho = "", corpo = null) {
+  const r = await fetch(`${API_BASE}/api/v1/restaurante/${getRestaurantId()}/mesas-qr${caminho}`,
+    corpo ? { method: "POST", headers: buildHeaders(), body: JSON.stringify(corpo) } : { headers: buildHeaders() });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Não deu pra carregar os QR Codes");
+  _qrMesas = d;
+  try { localStorage.setItem("fluxon_num_mesas", d.num_mesas); } catch {}
+  const cfg = document.getElementById("settings-num-mesas"); if (cfg) cfg.value = d.num_mesas;
+  return d;
+}
+async function carregarQrMesas() {
   const lista = document.getElementById("lista-qrcodes");
   if (!lista) return;
+  if (!_qrMesas) lista.innerHTML = `<p style="color:rgba(252,228,228,0.5); font-size:13px;">Carregando os QR Codes...</p>`;
+  try { await qrMesasApi(); desenharQrMesas(); }
+  catch (e) { lista.innerHTML = `<p style="color:#f87171; font-size:13px;">${escapeHtml(e.message)}</p>`; }
+}
+// compatibilidade: quem ainda chamar o nome antigo só recarrega
+function gerarQrCodes() { return carregarQrMesas(); }
 
-  let dominioRaw = (document.getElementById("input-dominio-cardapio")?.value || localStorage.getItem("cardapio_url") || "").trim();
-  if (!dominioRaw) {
-    document.getElementById("dominio-popover").style.display = "block";
-    document.getElementById("input-dominio-cardapio")?.focus();
-    alert("Configure o domínio do cardápio antes (botão ⋯).");
+function desenharQrMesas(marcar = []) {
+  const lista = document.getElementById("lista-qrcodes");
+  if (!lista || !_qrMesas) return;
+  const total = document.getElementById("qr-total-mesas");
+  if (total) total.textContent = `${_qrMesas.num_mesas} ${_qrMesas.num_mesas === 1 ? "mesa" : "mesas"}`;
+  if (!_qrMesas.dominio) {
+    lista.innerHTML = `<p style="color:rgba(252,228,228,0.7); font-size:13.5px;">Configure o domínio do cardápio no botão ⋯ pra ver os QR Codes das mesas.</p>`;
     return;
   }
-
-  const dominio = dominioRaw.startsWith("http") ? dominioRaw.replace(/\/$/, "") : `https://${dominioRaw.replace(/\/$/, "")}`;
-  lista.innerHTML = "";
-
-  // Barra de ações
-  const printBar = document.createElement("div");
-  printBar.style.cssText = "width:100%; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px;";
-  printBar.innerHTML = `
-    <div style="display:flex; align-items:center; gap:10px;">
-      <input type="checkbox" id="select-all-qr" class="qr-checkbox"
-  style="flex-shrink:0;"
-  onchange="toggleSelectAllQr(this.checked)" />
-      <label for="select-all-qr"
-        style="color:rgba(252,228,228,0.8); font-size:13px; font-weight:700; cursor:pointer;">
-        Selecionar todos
-      </label>
-      <span id="qr-selected-count"
-        style="color:rgba(249,115,115,0.9); font-size:12px; font-weight:700; display:none;">
-        0 selecionados
-      </span>
+  lista.innerHTML = `
+    <div style="width:100%; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" id="select-all-qr" class="qr-checkbox-todos" style="flex-shrink:0;" onchange="toggleSelectAllQr(this.checked)" />
+        <label for="select-all-qr" style="color:rgba(252,228,228,0.8); font-size:13px; font-weight:700; cursor:pointer;">Selecionar todos</label>
+        <span id="qr-selected-count" style="color:rgba(249,115,115,0.9); font-size:12px; font-weight:700; display:none;">0 selecionados</span>
+      </div>
+      <button onclick="imprimirQrCodes()" style="padding:10px 20px; border-radius:10px; border:none; background:rgba(249,115,115,0.85); color:#000; font-weight:800; font-size:13px; cursor:pointer; font-family:inherit;">🖨️ Imprimir selecionados</button>
     </div>
-    <button onclick="imprimirQrCodes()" style="
-      padding:10px 20px; border-radius:10px; border:none;
-      background:rgba(249,115,115,0.85); color:#000;
-      font-weight:800; font-size:13px; cursor:pointer;
-      font-family:inherit;
-    ">🖨️ Imprimir selecionados</button>
-  `;
-  lista.appendChild(printBar);
-
-  // Grid dos QR codes
-  const grid = document.createElement("div");
-  grid.id = "qr-grid";
-  grid.style.cssText = "display:flex; flex-wrap:wrap; gap:16px;";
-  lista.appendChild(grid);
-
-  for (let i = 1; i <= qtd; i++) {
-    const url = `${dominio}?mesa=${i}`;
-    const div = document.createElement("div");
-    div.dataset.mesa = i;
-    div.dataset.url = url;
-    div.style.cssText = `
-      display:flex; flex-direction:column; align-items:center; gap:8px;
-      padding:16px; background:rgba(28,28,30,0.45);
-      border:1px solid rgba(255,255,255,0.18); border-radius:12px;
-      position:relative; cursor:pointer; transition:border-color 0.2s;
-    `;
-
-    div.innerHTML = `
-      <input type="checkbox" class="qr-checkbox" data-mesa="${i}"
-         style="position:absolute; bottom:10px; right:10px; z-index:2;"
-        onchange="onQrCheckboxChange()" />
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(url)}"
-        alt="QR Mesa ${i}" style="border-radius:8px;" />
-      <span style="color:rgba(252,228,228,0.9); font-weight:700; font-size:13px;">Mesa ${i}</span>
-      <a href="${url}" target="_blank"
-        style="color:rgba(249,115,115,0.8); font-size:10px; text-decoration:none;
-          word-break:break-all; text-align:center; max-width:130px;"
-        onclick="event.stopPropagation()">
-        ${url}
-      </a>
-    `;
-
-    // Clique no card seleciona/deseleciona
-    div.addEventListener("click", (e) => {
-      if (e.target.tagName === "A" || e.target.tagName === "INPUT") return;
-      const cb = div.querySelector(".qr-checkbox");
-      cb.checked = !cb.checked;
-      onQrCheckboxChange();
-    });
-
-    grid.appendChild(div);
-  }
+    <div id="qr-grid" style="display:flex; flex-wrap:wrap; gap:16px;">
+      ${_qrMesas.mesas.map(m => {
+        const url = qrLinkMesa(m);
+        return `
+        <div class="qr-card" data-mesa="${m.mesa}" data-url="${escapeHtml(url)}" style="display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px; background:rgba(28,28,30,0.45); border:1px solid rgba(255,255,255,0.18); border-radius:12px; position:relative; cursor:pointer; transition:border-color 0.2s; width:182px; box-sizing:border-box;">
+          <input type="checkbox" class="qr-checkbox" data-mesa="${m.mesa}" style="position:absolute; top:10px; right:10px; z-index:2;" ${marcar.includes(m.mesa) ? "checked" : ""} onchange="onQrCheckboxChange()" />
+          <img src="${qrPng(url, 300)}" alt="QR da mesa ${m.mesa}" style="width:150px; height:150px; border-radius:8px; background:#fff;" />
+          <span style="color:rgba(252,228,228,0.95); font-weight:800; font-size:14px;">Mesa ${m.mesa}${m.ocupada ? ` <small style="color:#fbbf24; font-weight:700; font-size:11px;">• conta aberta</small>` : ""}</span>
+          <span style="color:rgba(252,228,228,0.4); font-size:10px; word-break:break-all; text-align:center;">${escapeHtml(url.replace(/^https:\/\//, ""))}</span>
+          <div style="display:flex; gap:6px; width:100%;">
+            <button type="button" data-qr-baixar="${m.mesa}" style="flex:1; padding:6px 0; border-radius:8px; border:1px solid rgba(255,255,255,0.16); background:transparent; color:rgba(252,228,228,0.8); font-size:11.5px; font-weight:700; cursor:pointer; font-family:inherit;">Baixar</button>
+            <button type="button" data-qr-trocar="${m.mesa}" style="flex:1; padding:6px 0; border-radius:8px; border:1px solid rgba(239,68,68,0.4); background:transparent; color:rgba(248,113,113,0.9); font-size:11.5px; font-weight:700; cursor:pointer; font-family:inherit;">Trocar QR</button>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+  onQrCheckboxChange();
+}
+document.addEventListener("click", (e) => {
+  const grid = e.target.closest("#qr-grid");
+  if (!grid) return;
+  const baixar = e.target.closest("[data-qr-baixar]"), trocar = e.target.closest("[data-qr-trocar]");
+  if (baixar) return baixarQrMesa(+baixar.dataset.qrBaixar);
+  if (trocar) return trocarQrMesa(+trocar.dataset.qrTrocar);
+  const card = e.target.closest(".qr-card");
+  if (!card || e.target.tagName === "INPUT") return;
+  const cb = card.querySelector(".qr-checkbox");
+  cb.checked = !cb.checked;
+  onQrCheckboxChange();
+});
+function baixarQrMesa(mesa) {
+  const m = _qrMesas?.mesas.find(x => x.mesa === mesa);
+  if (!m) return;
+  const a = document.createElement("a");
+  a.href = qrPng(qrLinkMesa(m), 1000); a.download = `qr-mesa-${mesa}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function trocarQrMesa(mesa) {
+  showConfirmModal(`Trocar o QR da mesa ${mesa}? O QR impresso dessa mesa para de funcionar na hora e você vai precisar imprimir o novo.`, async () => {
+    try { await qrMesasApi("/trocar", { mesa }); desenharQrMesas([mesa]); }
+    catch (e) { alert(e.message); }
+  });
+}
+function trocarTodosQr() {
+  document.getElementById("dominio-popover").style.display = "none";
+  showConfirmModal("Gerar QRs novos para TODAS as mesas? Todos os QRs impressos param de funcionar na hora e você vai precisar imprimir tudo de novo. Use só se um QR vazou.", async () => {
+    try { await qrMesasApi("/trocar", { todas: true }); desenharQrMesas(_qrMesas.mesas.map(m => m.mesa)); }
+    catch (e) { alert(e.message); }
+  });
+}
+function removerUltimaMesa() {
+  const n = _qrMesas?.num_mesas;
+  if (!n) return;
+  showConfirmModal(`Remover a mesa ${n}? O QR dela para de funcionar e ela some da tela de Mesas.`, async () => {
+    try { await qrMesasApi("/remover", {}); desenharQrMesas(); }
+    catch (e) { alert(e.message); }
+  });
+}
+// adicionar mesas: começa sempre na próxima (o "De" vem travado)
+function abrirAdicionarMesas() {
+  const de = (_qrMesas?.num_mesas || 0) + 1;
+  document.getElementById("qr-add-modal")?.remove();
+  const m = document.createElement("div");
+  m.id = "qr-add-modal"; m.className = "modal-backdrop open";
+  m.innerHTML = `
+    <div class="modal" style="max-width:400px; width:92vw;">
+      <div class="modal-header"><h3>Adicionar mesas</h3></div>
+      <div style="display:flex; flex-direction:column; gap:14px; padding:18px 0 8px;">
+        <div style="display:flex; gap:12px;">
+          <label style="flex:0 0 90px; display:flex; flex-direction:column; gap:6px; color:rgba(252,228,228,0.7); font-size:12px; font-weight:700;">De
+            <input value="${de}" disabled style="width:100%; box-sizing:border-box; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.04); color:rgba(252,228,228,0.6); font-size:15px; font-weight:800; font-family:inherit; text-align:center;"></label>
+          <label style="flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; color:rgba(252,228,228,0.7); font-size:12px; font-weight:700;">Quantas mesas novas
+            <input id="qr-add-qtd" inputmode="numeric" maxlength="2" placeholder="Ex.: 5" style="width:100%; box-sizing:border-box; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); background:rgba(28,28,30,0.45); color:#fff; font-size:15px; font-weight:800; outline:none; font-family:inherit;"></label>
+        </div>
+        <p id="qr-add-previa" style="margin:0; color:rgba(252,228,228,0.65); font-size:13px;">Digite quantas mesas você colocou no salão.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost-button" type="button" data-qr-add-cancelar>Cancelar</button>
+        <button class="primary-button" type="button" data-qr-add-ok disabled>Adicionar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  const inp = m.querySelector("#qr-add-qtd"), ok = m.querySelector("[data-qr-add-ok]"), previa = m.querySelector("#qr-add-previa");
+  inp.focus();
+  inp.addEventListener("input", () => {
+    inp.value = inp.value.replace(/\D/g, "");
+    const q = Number(inp.value);
+    ok.disabled = !(q >= 1 && q <= 50);
+    previa.textContent = q >= 1 && q <= 50 ? (q === 1 ? `Vai ser criada a mesa ${de}.` : `Vão ser criadas as mesas ${de} a ${de + q - 1}.`)
+      : q > 50 ? "No máximo 50 mesas por vez." : "Digite quantas mesas você colocou no salão.";
+  });
+  m.addEventListener("click", async (e) => {
+    if (e.target === m || e.target.closest("[data-qr-add-cancelar]")) return m.remove();
+    if (!e.target.closest("[data-qr-add-ok]") || ok.disabled) return;
+    ok.disabled = true; ok.textContent = "Adicionando...";
+    try {
+      const d = await qrMesasApi("/adicionar", { quantidade: Number(inp.value) });
+      m.remove();
+      const novas = []; for (let i = d.novas.de; i <= d.novas.ate; i++) novas.push(i);
+      desenharQrMesas(novas); // as novas já vêm marcadas pra imprimir
+    } catch (err) { previa.textContent = err.message; ok.disabled = false; ok.textContent = "Adicionar"; }
+  });
 }
 
 function onQrCheckboxChange() {
-  const all = document.querySelectorAll(".qr-checkbox");
+  const all = document.querySelectorAll("#qr-grid .qr-checkbox");
   const checked = [...all].filter(cb => cb.checked);
   const selectAll = document.getElementById("select-all-qr");
   const counter = document.getElementById("qr-selected-count");
@@ -8666,7 +8734,7 @@ function onQrCheckboxChange() {
   }
 
   // Destaca cards selecionados
-  document.querySelectorAll("#qr-grid > div[data-mesa]").forEach(card => {
+  document.querySelectorAll("#qr-grid > .qr-card").forEach(card => {
     const cb = card.querySelector(".qr-checkbox");
     card.style.borderColor = cb?.checked
       ? "rgba(249,115,115,0.9)"
@@ -8675,7 +8743,7 @@ function onQrCheckboxChange() {
 }
 
 function toggleSelectAllQr(checked) {
-  document.querySelectorAll(".qr-checkbox").forEach(cb => cb.checked = checked);
+  document.querySelectorAll("#qr-grid .qr-checkbox").forEach(cb => cb.checked = checked);
   onQrCheckboxChange();
 }
 
@@ -8683,7 +8751,7 @@ function imprimirQrCodes() {
   const grid = document.getElementById("qr-grid");
   if (!grid) return;
 
-  const allCards = grid.querySelectorAll("div[data-mesa]");
+  const allCards = grid.querySelectorAll(".qr-card");
   const checkedCards = [...allCards].filter(card => {
     const cb = card.querySelector(".qr-checkbox");
     return cb && cb.checked;
@@ -8719,7 +8787,7 @@ function imprimirQrCodes() {
     const url = item.dataset.url;
     html += `
       <div class="item">
-        <img src="https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(url)}" />
+        <img src="${qrPng(url, 400)}" />
         <span class="mesa">Mesa ${mesa}</span>
         <span class="url">${url}</span>
       </div>
