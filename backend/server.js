@@ -6915,7 +6915,7 @@ const is_caixa = toBool(impressora.is_caixa) || toBool(impressora.caixa);
    imprimiu não repete. Reiniciou o servidor (deploy)? Ele retoma a fila. Não deu em 1 hora:
    o Operacional avisa e o caixa toca "Imprimir de novo".
 ======================================== */
-const IMPRESSAO_ESPERAS = [30, 60, 120, 300, 600, 900, 900, 900]; // segundos até a próxima tentativa
+const IMPRESSAO_ESPERAS = [15, 30, 60, 90, 120, 210, 300, 420, 600]; // segundos até a próxima tentativa (~31 min no total)
 async function imprimirOuGuardar(order, apiKey, printerId, isCaixa) {
   let ok = false, erro = null;
   try { ok = await printOrder(order, apiKey, printerId, isCaixa); } catch (e) { erro = e.message; }
@@ -6968,7 +6968,7 @@ async function processarFilaImpressao() {
   } catch (e) { console.error("⚠️ fila de impressão:", e.message); }
   finally { _filaRodando = false; }
 }
-setInterval(processarFilaImpressao, 20000).unref();
+setInterval(processarFilaImpressao, 10000).unref();
 setTimeout(processarFilaImpressao, 5000).unref(); // voltou do deploy: retoma o que ficou
 
 // Operacional: o que está na fila agora (aguardando ou que não imprimiu), pra mostrar o aviso ao caixa
