@@ -32,7 +32,7 @@
       <h1>Bora rodar?</h1>
       <p class="muted">Entre com o WhatsApp que o restaurante cadastrou. O código chega por lá.</p>
       <label>Seu WhatsApp
-        <input id="in-tel" inputmode="tel" autocomplete="tel" placeholder="(14) 99999-9999" maxlength="15">
+        <input id="in-tel" inputmode="tel" data-mask="tel" autocomplete="tel" placeholder="(14) 99999-9999" maxlength="15">
       </label>
       <button class="btn primario grande" type="submit" id="btn-tel">Receber código</button>
     </form>
@@ -128,7 +128,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="comum.js?v=2"></script>
-<script src="login.js"></script>
+<script src="mascaras.js"></script>
+<script src="login.js?v=2"></script>
 <script src="mapa.js?v=2"></script>
 <script src="pegar.js"></script>
 <script src="troco.js"></script>
