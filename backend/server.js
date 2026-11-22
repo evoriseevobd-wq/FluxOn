@@ -5804,6 +5804,7 @@ app.get("/api/v1/restaurante/:restaurant_id/config", async (req, res) => {
       tema: config?.tema || "dark",
       cores_apps: config?.cores_apps || {},
       num_mesas: config?.num_mesas || 10,
+       mesa_aceite: !!config?.mesa_aceite, // atendente confirma os pedidos do QR da mesa (liga no Owner)
       tempo_recebido: config?.tempo_recebido ?? 1.5,
       tempo_preparo: config?.tempo_preparo ?? 20,
       tempo_pronto: config?.tempo_pronto ?? 10,
@@ -10284,6 +10285,24 @@ const custoMesAnterior = (comp) => {
   return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 10);
 };
 const donoRota = [ownerLimitDados, requireOwnerScope, requireOwnerRestaurante];
+
+// 🔐 "Atendente confirma os pedidos da mesa": ligado, o pedido do QR espera o Aceitar no Operacional antes da cozinha
+app.get("/owner/restaurants/:restaurant_id/mesa-aceite", donoRota, async (req, res) => {
+  const { data } = await supabase.from("restaurante_config").select("mesa_aceite").eq("restaurant_id", req.params.restaurant_id).maybeSingle();
+  return res.json({ ativo: !!data?.mesa_aceite });
+});
+app.put("/owner/restaurants/:restaurant_id/mesa-aceite", donoRota, async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id, ativo = req.body?.ativo === true;
+    const { data: cfg } = await supabase.from("restaurante_config").select("restaurant_id").eq("restaurant_id", rid).maybeSingle();
+    const { error } = cfg
+      ? await supabase.from("restaurante_config").update({ mesa_aceite: ativo }).eq("restaurant_id", rid)
+      : await supabase.from("restaurante_config").insert([{ restaurant_id: rid, mesa_aceite: ativo }]);
+    if (error) throw error;
+    io.to(rid).emit("config_mesa", { mesa_aceite: ativo }); // o Operacional aberto já passa a pedir o aceite
+    return res.json({ ativo });
+  } catch (err) { console.error("❌ mesa-aceite:", err.message); return sendError(res, 500, "Não deu pra salvar"); }
+});
 
 // o custo do insumo é o da compra mais recente (valor pago ÷ quantidade)
 async function custoRecalcularInsumo(restaurant_id, insumo_id) {
