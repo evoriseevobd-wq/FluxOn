@@ -6962,9 +6962,7 @@ async function processarFilaImpressao() {
         io.to(j.restaurant_id).emit("impressao_fila", { id: j.id, status: "falhou", order_number: j.order_number });
       }
     }
-    // faxina: o que já imprimiu ou foi resolvido some depois de 24 horas
-    if (agora.getMinutes() === 0) await supabase.from("fila_impressao").delete().in("status", ["impresso", "descartado"])
-      .lt("criado_em", new Date(Date.now() - 86400000).toISOString());
+    
   } catch (e) { console.error("⚠️ fila de impressão:", e.message); }
   finally { _filaRodando = false; }
 }
