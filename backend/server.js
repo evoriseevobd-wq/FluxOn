@@ -6870,14 +6870,14 @@ const is_caixa = toBool(impressora.is_caixa) || toBool(impressora.caixa);
 
       // CAIXA: imprime tudo, layout completo
       if (is_caixa) {
-        await printOrder({ ...order, itens: itensComCategoria }, apiKey, printer_id, true);
+        await imprimirOuGuardar({ ...order, itens: itensComCategoria }, apiKey, printer_id, true);
         console.log(`🖨️ Caixa ${printer_id} — cupom completo`);
         continue;
       }
 
       // DELIVERY: imprime tudo na primeira impressora não-caixa
       if (isDelivery) {
-        await printOrder({ ...order, itens: itensComCategoria }, apiKey, printer_id, false);
+        await imprimirOuGuardar({ ...order, itens: itensComCategoria }, apiKey, printer_id, false);
         console.log(`🖨️ Delivery — ${printer_id} — pedido completo`);
         break;
       }
@@ -6896,7 +6896,7 @@ const is_caixa = toBool(impressora.is_caixa) || toBool(impressora.caixa);
 
       if (itensFiltrados.length === 0) continue;
 
-      await printOrder({ ...order, itens: itensFiltrados }, apiKey, printer_id, false);
+      await imprimirOuGuardar({ ...order, itens: itensFiltrados }, apiKey, printer_id, false);
       console.log(`🖨️ Impressora ${printer_id} — ${itensFiltrados.length} item(ns)`);
     }
 
@@ -6906,6 +6906,89 @@ const is_caixa = toBool(impressora.is_caixa) || toBool(impressora.caixa);
     return false;
   }
 }
+
+/* ========================================
+   🖨️ FILA DE IMPRESSÃO QUE NÃO PERDE COMANDA (sem Redis, sem Upstash)
+   Imprime na hora, como sempre. Só se a impressão falhar (PrintNode fora, internet da loja caiu,
+   computador da impressora desligado), a comanda vai pra tabela fila_impressao e o servidor tenta
+   de novo sozinho: 30 s, 1, 2, 5, 10 e 15 min... (~1 hora). Cada impressora é uma linha: a que
+   imprimiu não repete. Reiniciou o servidor (deploy)? Ele retoma a fila. Não deu em 1 hora:
+   o Operacional avisa e o caixa toca "Imprimir de novo".
+======================================== */
+const IMPRESSAO_ESPERAS = [30, 60, 120, 300, 600, 900, 900, 900]; // segundos até a próxima tentativa
+async function imprimirOuGuardar(order, apiKey, printerId, isCaixa) {
+  let ok = false, erro = null;
+  try { ok = await printOrder(order, apiKey, printerId, isCaixa); } catch (e) { erro = e.message; }
+  if (ok) return true;
+  try {
+    const { data } = await supabase.from("fila_impressao").insert([{
+      restaurant_id: order.restaurant_id, order_id: order.id != null ? String(order.id) : null, order_number: String(order.order_number ?? ""),
+      printer_id: String(printerId), is_caixa: !!isCaixa, pedido: order, status: "pendente", tentativas: 1,
+      proxima_em: new Date(Date.now() + IMPRESSAO_ESPERAS[0] * 1000).toISOString(), erro: erro || "A impressora não respondeu"
+    }]).select().single();
+    console.warn(`🖨️ Comanda do pedido #${order.order_number} guardada na fila (impressora ${printerId})`);
+    if (data) io.to(order.restaurant_id).emit("impressao_fila", { id: data.id, status: "pendente", order_number: data.order_number });
+  } catch (e) { console.error("❌ fila_impressao:", e.message); }
+  return false;
+}
+let _filaRodando = false;
+async function processarFilaImpressao() {
+  if (_filaRodando) return;
+  _filaRodando = true;
+  try {
+    const agora = new Date();
+    const { data: jobs } = await supabase.from("fila_impressao").select("*").eq("status", "pendente")
+      .lte("proxima_em", agora.toISOString()).order("proxima_em").limit(10);
+    for (const j of jobs || []) {
+      // "pega" o trabalho (se tiver mais de um servidor, só um imprime; se cair no meio, volta em 2 min)
+      const { data: meu } = await supabase.from("fila_impressao").update({ proxima_em: new Date(Date.now() + 120000).toISOString() })
+        .eq("id", j.id).eq("status", "pendente").eq("proxima_em", j.proxima_em).select();
+      if (!meu?.length) continue;
+      const cfg = await getIntegracaoComCache(j.restaurant_id, "printnode");
+      let ok = false, erro = null;
+      if (!cfg?.api_key) erro = "Impressora não configurada";
+      else { try { ok = await printOrder(j.pedido, cfg.api_key, j.printer_id, j.is_caixa); } catch (e) { erro = e.message; } }
+      if (ok) {
+        await supabase.from("fila_impressao").update({ status: "impresso", impresso_em: new Date().toISOString(), erro: null }).eq("id", j.id);
+        console.log(`✅ Comanda do pedido #${j.order_number} impressa pela fila (tentativa ${j.tentativas + 1})`);
+        io.to(j.restaurant_id).emit("impressao_fila", { id: j.id, status: "impresso", order_number: j.order_number });
+        continue;
+      }
+      const t = (j.tentativas || 1) + 1, espera = IMPRESSAO_ESPERAS[t - 1];
+      await supabase.from("fila_impressao").update({ tentativas: t, erro: erro || "A impressora não respondeu",
+        ...(espera === undefined ? { status: "falhou" } : { proxima_em: new Date(Date.now() + espera * 1000).toISOString() }) }).eq("id", j.id);
+      if (espera === undefined) {
+        console.error(`❌ Comanda do pedido #${j.order_number} não imprimiu depois de ${t} tentativas`);
+        io.to(j.restaurant_id).emit("impressao_fila", { id: j.id, status: "falhou", order_number: j.order_number });
+      }
+    }
+    // faxina: o que já imprimiu ou foi resolvido some depois de 7 dias
+    if (agora.getMinutes() === 0) await supabase.from("fila_impressao").delete().in("status", ["impresso", "descartado"])
+      .lt("criado_em", new Date(Date.now() - 7 * 86400000).toISOString());
+  } catch (e) { console.error("⚠️ fila de impressão:", e.message); }
+  finally { _filaRodando = false; }
+}
+setInterval(processarFilaImpressao, 20000).unref();
+setTimeout(processarFilaImpressao, 5000).unref(); // voltou do deploy: retoma o que ficou
+
+// Operacional: o que está na fila agora (aguardando ou que não imprimiu), pra mostrar o aviso ao caixa
+app.get("/api/v1/restaurante/:restaurant_id/impressora/fila", async (req, res) => {
+  const { data } = await supabase.from("fila_impressao").select("id, order_number, printer_id, status, tentativas, erro, criado_em")
+    .eq("restaurant_id", req.params.restaurant_id).in("status", ["pendente", "falhou"])
+    .gte("criado_em", new Date(Date.now() - 12 * 3600000).toISOString()).order("criado_em");
+  return res.json(data || []);
+});
+// "Imprimir de novo" (volta pra fila agora) ou "Já resolvi" (o caixa imprimiu de outro jeito)
+app.post("/api/v1/restaurante/:restaurant_id/impressora/fila/:id/:acao", async (req, res) => {
+  const { restaurant_id, id, acao } = req.params;
+  if (!["reenviar", "descartar"].includes(acao)) return sendError(res, 400, "Ação inválida");
+  const { data, error } = await supabase.from("fila_impressao")
+    .update(acao === "reenviar" ? { status: "pendente", tentativas: 1, proxima_em: new Date().toISOString() } : { status: "descartado" })
+    .eq("id", id).eq("restaurant_id", restaurant_id).in("status", ["pendente", "falhou"]).select();
+  if (error || !data?.length) return sendError(res, 404, "Essa comanda não está mais na fila");
+  if (acao === "reenviar") processarFilaImpressao();
+  return res.json({ ok: true });
+});
 
 // ===== WORKER DE IMPRESSÃO (só com Redis) =====
 if (REDIS_ON) {
