@@ -114,6 +114,13 @@ async function destinos(rid, pedidos) {
     const { data } = await C.supabase.from("locais_entrega").select("endereco_chave, lat, lng, fonte").eq("restaurant_id", rid).in("endereco_chave", chaves);
     const porChave = new Map((data || []).map((l) => [l.endereco_chave, l]));
     for (const o of faltam) { const l = porChave.get(chaveEndereco(o.address)); if (l) mapa.set(o.id, { lat: l.lat, lng: l.lng, fonte: l.fonte }); }
+         // sem casa marcada: o ponto do endereço que o servidor já achou no TomTom (o app não precisa procurar de novo)
+    const resto = [...new Set(faltam.filter((o) => !mapa.has(o.id)).map((o) => chaveEndereco(o.address)).filter(Boolean))];
+    if (resto.length) {
+      const { data: geo } = await C.supabase.from("enderecos_geo").select("endereco_chave, lat, lng").eq("restaurant_id", rid).in("endereco_chave", resto);
+      const porGeo = new Map((geo || []).map((g) => [g.endereco_chave, g]));
+      for (const o of faltam) { const g = !mapa.has(o.id) && porGeo.get(chaveEndereco(o.address)); if (g) mapa.set(o.id, { lat: g.lat, lng: g.lng, fonte: "endereco" }); }
+    }
   }
   return mapa;
 }
@@ -125,6 +132,57 @@ async function salvarLocal(rid, addr, telefone, p, fonte) {
   const { data: atual } = await C.supabase.from("locais_entrega").select("lat, lng, fonte").eq("restaurant_id", rid).eq("endereco_chave", chave).maybeSingle();
   if (atual && fonte === "entregador" && distMetros(atual, p) > 300) return; // marcou "Entregue" longe da casa: não estraga o ponto
   await C.supabase.from("locais_entrega").upsert({ restaurant_id: rid, endereco_chave: chave, telefone: digitos(telefone) || null, lat: p.lat, lng: p.lng, fonte, atualizado_em: new Date().toISOString() }, { onConflict: "restaurant_id,endereco_chave" });
+}
+
+/* ---------------- km da entrega (quem recebe por km) ----------------
+   Calculado aqui no servidor, nunca no celular: rota de carro da loja até a casa (TomTom), ida e volta.
+   A casa: o ponto que o cliente marcou, ou o do endereço escrito (o ponto do GPS do entregador não conta pro valor).
+   Endereço repetido não gasta TomTom: o ponto e o km ficam guardados em enderecos_geo. */
+const _pontoLoja = new Map(); // "rid|endereço da loja" → { lat, lng }
+const _limpaEnd = (q) => String(q || "").replace(/\b\d{5}-?\d{3}\b/g, "").replace(/\s+-\s+/g, ", ").replace(/\//g, ", ").replace(/(,\s*)+$/, "").trim();
+async function ttGeo(q, key) {
+  const limpo = _limpaEnd(q);
+  if (!limpo) return null;
+  const r = await fetch(`https://api.tomtom.com/search/2/geocode/${encodeURIComponent(limpo)}.json?countrySet=BR&limit=1&language=pt-BR&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(6000) });
+  if (!r.ok) throw new Error(`TomTom endereço ${r.status}`);
+  const p = (await r.json()).results?.[0]?.position;
+  return p && Number.isFinite(p.lat) && Number.isFinite(p.lon) ? { lat: p.lat, lng: p.lon } : null;
+}
+async function ttKmIda(a, b, key) {
+  const r = await fetch(`https://api.tomtom.com/routing/1/calculateRoute/${a.lat},${a.lng}:${b.lat},${b.lng}/json?routeType=shortest&traffic=false&travelMode=car&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(6000) });
+  if (!r.ok) throw new Error(`TomTom rota ${r.status}`);
+  const m = (await r.json()).routes?.[0]?.summary?.lengthInMeters;
+  return Number.isFinite(m) ? m / 1000 : null;
+}
+// km de ida e volta (null = não deu pra calcular: sem chave do TomTom, endereço não achado ou longe demais)
+async function kmDaEntrega(o) {
+  const tt = (await C.getIntegracao(o.restaurant_id, "tomtom"))?.key;
+  if (!tt || !o.address) return null;
+  const chave = chaveEndereco(o.address);
+  const [{ data: cfg }, { data: geo }] = await Promise.all([
+    C.supabase.from("restaurante_config").select("endereco").eq("restaurant_id", o.restaurant_id).maybeSingle(),
+    chave ? C.supabase.from("enderecos_geo").select("lat, lng, km_ida, km_de").eq("restaurant_id", o.restaurant_id).eq("endereco_chave", chave).maybeSingle() : { data: null }
+  ]);
+  const endLoja = String(cfg?.endereco || "").trim();
+  if (!endLoja) return null;
+  const ck = `${o.restaurant_id}|${endLoja}`;
+  let loja = _pontoLoja.get(ck);
+  if (!loja) { loja = await ttGeo(endLoja, tt); if (!loja) return null; _pontoLoja.set(ck, loja); }
+  let casa = o.destino_lat != null && o.destino_fonte === "cliente" ? { lat: Number(o.destino_lat), lng: Number(o.destino_lng) } : null;
+  if (!casa && geo) casa = { lat: Number(geo.lat), lng: Number(geo.lng) };
+  let novo = false;
+  if (!casa) { casa = await ttGeo(o.address, tt); novo = true; }
+  if (!casa) return null;
+  const de = [loja.lat, loja.lng, casa.lat, casa.lng].map((n) => Number(n).toFixed(4)).join(",");
+  if (geo && geo.km_de === de && Number(geo.km_ida) > 0) return r2(Number(geo.km_ida) * 2);
+  const ida = await ttKmIda(loja, casa, tt);
+  if (!ida || ida > 40) return null; // mais de 40 km: o endereço foi achado no lugar errado
+  if (chave) {
+    const ponto = novo || !geo ? { lat: casa.lat, lng: casa.lng } : {};
+    const { error } = await C.supabase.from("enderecos_geo").upsert({ restaurant_id: o.restaurant_id, endereco_chave: chave, ...(geo ? {} : { lat: casa.lat, lng: casa.lng }), ...ponto, km_ida: r2(ida), km_de: de, atualizado_em: new Date().toISOString() }, { onConflict: "restaurant_id,endereco_chave" });
+    if (error) console.error("⚠️ enderecos_geo:", error.message);
+  }
+  return r2(ida * 2);
 }
 
 // o que o app do entregador recebe de cada pedido
@@ -169,7 +227,14 @@ async function turnoAberto(entId) {
 async function garantirTurno(ent) {
   const aberto = await turnoAberto(ent.id);
   if (aberto) return aberto;
-  const { data: e } = await C.supabase.from("entregadores").select("restaurant_id, tipo_pagamento, valor_diaria").eq("id", ent.id).maybeSingle();
+   // o último turno de hoje fechou sozinho (2h sem entrega)? reabre ele mesmo
+  const { data: ult } = await C.supabase.from("entregador_turnos").select("id, encerrado_por").eq("entregador_id", ent.id).gte("inicio", inicioDoDia()).order("inicio", { ascending: false }).limit(1);
+  if (ult?.[0]?.encerrado_por === "automatico") {
+    const { data: volta } = await C.supabase.from("entregador_turnos").update({ fim: null, encerrado_por: null, reaberto_em: new Date().toISOString() })
+      .eq("id", ult[0].id).not("fim", "is", null).select("id, inicio, fim, valor_turno, restaurant_id").maybeSingle();
+    if (volta) { C.io.to(volta.restaurant_id).emit("entregadores_mudou"); return volta; }
+  }
+   const { data: e } = await C.supabase.from("entregadores").select("restaurant_id, tipo_pagamento, valor_diaria").eq("id", ent.id).maybeSingle();
   if (!e) throw new Error("Entregador não encontrado");
   const { data, error } = await C.supabase.from("entregador_turnos")
     .insert([{ restaurant_id: e.restaurant_id, entregador_id: ent.id, valor_turno: e.tipo_pagamento === "entrega" ? 0 : r2(e.valor_diaria) }])
@@ -203,8 +268,8 @@ async function nomeRestaurante(rid) {
 }
 
 async function configDo(rid) {
-  const { data } = await C.supabase.from("entregador_config").select("avisar_cliente").eq("restaurant_id", rid).maybeSingle();
-  return { avisar_cliente: data ? !!data.avisar_cliente : true };
+  const { data } = await C.supabase.from("entregador_config").select("avisar_cliente, valor_minimo_entrega").eq("restaurant_id", rid).maybeSingle();
+  return { avisar_cliente: data ? !!data.avisar_cliente : true, valor_minimo_entrega: r2(data?.valor_minimo_entrega) };
 }
 
 // manda WhatsApp pelo webhook DO RESTAURANTE (é o restaurante falando com o cliente e o entregador dele):
@@ -637,6 +702,7 @@ export function registrarEntregador(ctx) {
     try {
       const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String))].slice(0, 30);
       if (!ids.length) return res.status(400).json({ error: "Escolha pelo menos um pedido" });
+      if (!(await turnoAberto(req.ent.id))) return res.status(409).json({ error: "Seu turno ainda não foi aberto. Peça pro caixa abrir." });
       const pegos = await levarPedidos(req.ent.restaurant_id, req.ent, ids);
       const ok = new Set(pegos.map((p) => p.id));
       return res.json({ pegos: pegos.map(pedidoParaApp), perdidos: ids.filter((id) => !ok.has(id)) });
@@ -646,7 +712,7 @@ export function registrarEntregador(ctx) {
   app.post("/api/v1/entregador/entregue", async (req, res) => {
     try {
       const id = String(req.body?.id || "");
-      const { data: o } = await supabase.from("orders").select("id, status, entregador_id, restaurant_id, address, client_phone").eq("id", id).maybeSingle();
+      const { data: o } = await supabase.from("orders").select("id, status, entregador_id, restaurant_id, address, client_phone, destino_lat, destino_lng, destino_fonte").eq("id", id).maybeSingle();
       if (!o || o.entregador_id !== req.ent.id) return res.status(404).json({ error: "Esse pedido não está com você" });
       // tocou "Entregue" na porta: o GPS dele vira a casa desse endereço (só se o sinal estiver bom)
       const gps = { lat: Number(req.body?.lat), lng: Number(req.body?.lng) };
@@ -676,11 +742,13 @@ export function registrarEntregador(ctx) {
       // comissão desta entrega: fica gravada no pedido (mudar o cadastro depois não mexe no que já passou)
       try {
         const { data: cad } = await supabase.from("entregadores").select("tipo_pagamento, valor_entrega, entrega_por_km").eq("id", req.ent.id).maybeSingle();
-        const km = Number(req.body?.km);
-        const kmOk = Number.isFinite(km) && km > 0 && km <= 80 ? r2(km) : null;
-        let valor = null; // null = ganha a taxa de entrega do pedido (sem valor no cadastro, ou sem km)
+        const porKm = cad && cad.tipo_pagamento !== "diaria" && Number(cad.valor_entrega) > 0 && cad.entrega_por_km;
+        // o km sai daqui (TomTom, ida e volta), nunca do celular; sem km, vale o mínimo do restaurante
+        const kmOk = porKm ? await kmDaEntrega(o).catch((e) => { console.error("⚠️ km da entrega:", e.message); return null; }) : null;
+        const minimo = porKm ? Number((await configDo(o.restaurant_id)).valor_minimo_entrega) || 0 : 0;
+        let valor = null; // null = ganha a taxa de entrega do pedido (sem valor no cadastro, ou sem km e sem mínimo)
         if (cad && cad.tipo_pagamento !== "diaria" && Number(cad.valor_entrega) > 0)
-          valor = cad.entrega_por_km ? (kmOk != null ? r2(kmOk * Number(cad.valor_entrega)) : null) : r2(cad.valor_entrega);
+          valor = porKm ? (kmOk != null ? r2(Math.max(kmOk * Number(cad.valor_entrega), minimo)) : (minimo > 0 ? r2(minimo) : null)) : r2(cad.valor_entrega);
         await supabase.from("orders").update({ km_entrega: kmOk, valor_entregador: valor }).eq("id", id);
       } catch (e) { console.error("⚠️ comissão do entregador:", e.message); }
       _cacheAtivos.delete(req.ent.id);
@@ -707,22 +775,10 @@ export function registrarEntregador(ctx) {
     } catch (e) { return erro(res, 500, "Não deu pra devolver o pedido", e); }
   });
 
-  // começar e encerrar o turno (o app do entregador)
-  app.post("/api/v1/entregador/turno/comecar", async (req, res) => {
-    try {
-      const t = await garantirTurno(req.ent);
-      await supabase.from("entregadores").update({ disponivel: true, visto_em: new Date().toISOString() }).eq("id", req.ent.id);
-      io.to(req.ent.restaurant_id).emit("entregadores_mudou");
-      return res.json({ success: true, turno: t });
-    } catch (e) { return erro(res, 500, "Não deu pra começar o turno", e); }
-  });
-  app.post("/api/v1/entregador/turno/encerrar", async (req, res) => {
-    try {
-      await encerrarTurno(req.ent, "entregador");
-      io.to(req.ent.restaurant_id).emit("entregadores_mudou");
-      return res.json({ success: true });
-    } catch (e) { return e.status ? res.status(e.status).json({ error: e.message }) : erro(res, 500, "Não deu pra encerrar o turno", e); }
-  });
+
+  // o turno agora é do caixa: o app do entregador não abre nem encerra
+  app.post(["/api/v1/entregador/turno/comecar", "/api/v1/entregador/turno/encerrar"], (req, res) =>
+    res.status(403).json({ error: "Quem abre e encerra o seu turno é o caixa do restaurante." }));
 
   // "Meu dia": o turno aberto (ou o último de hoje), as entregas, quanto vai receber e as rodadas
   app.get("/api/v1/entregador/dia", async (req, res) => {
@@ -832,11 +888,13 @@ export function registrarEntregador(ctx) {
   // lista com quem está na rua, disponível e onde está
   app.get(OP, async (req, res) => {
     const rid = req.params.restaurant_id;
-    const [{ data: lista, error }, { data: naRua }] = await Promise.all([
+    const [{ data: lista, error }, { data: naRua }, { data: turnosAbertos }] = await Promise.all([
 supabase.from("entregadores").select("id, nome, telefone, tipo_pagamento, valor_diaria, valor_entrega, entrega_por_km, ativo, disponivel, lat, lng, posicao_em, visto_em, ultimo_login, created_at").eq("restaurant_id", rid).order("nome"),
-      supabase.from("orders").select("id, order_number, entregador_id, address").eq("restaurant_id", rid).eq("status", "delivering").not("entregador_id", "is", null)
+      supabase.from("orders").select("id, order_number, entregador_id, address").eq("restaurant_id", rid).eq("status", "delivering").not("entregador_id", "is", null),
+      supabase.from("entregador_turnos").select("entregador_id, inicio").eq("restaurant_id", rid).is("fim", null)
     ]);
     if (error) return erro(res, 500, "Não deu pra carregar os entregadores", error);
+    const emTurno = new Map((turnosAbertos || []).map((t) => [t.entregador_id, t.inicio]));
     const conectados = new Set();
     try { for (const s of await io.in(`ent:${rid}`).fetchSockets()) if (s.data?.ent?.id) conectados.add(s.data.ent.id); } catch {}
     return res.json((lista || []).map((e) => {
@@ -847,14 +905,22 @@ supabase.from("entregadores").select("id, nome, telefone, tipo_pagamento, valor_
         id: e.id, nome: e.nome, telefone: e.telefone, tipo_pagamento: e.tipo_pagamento, valor_diaria: r2(e.valor_diaria),
         valor_entrega: r2(e.valor_entrega || 0), entrega_por_km: !!e.entrega_por_km,
         ativo: e.ativo, disponivel: !!e.disponivel, conectado: conectados.has(e.id), visto_em: e.visto_em, ja_entrou: !!e.ultimo_login,
-        posicao: pos, na_rua: pedidos.map((o) => ({ id: o.id, numero: o.order_number, bairro: enderecoPartes(o.address).bairro }))
+        posicao: pos, na_rua: pedidos.map((o) => ({ id: o.id, numero: o.order_number, bairro: enderecoPartes(o.address).bairro })),
+        turno_aberto: emTurno.get(e.id) || null
       };
     }));
   });
 
   app.get(`${OP}/config`, async (req, res) => res.json({ ...(await configDo(req.params.restaurant_id)), link_app: url || null }));
   app.patch(`${OP}/config`, async (req, res) => {
-    const { error } = await supabase.from("entregador_config").upsert({ restaurant_id: req.params.restaurant_id, avisar_cliente: !!req.body?.avisar_cliente, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });
+    const b = req.body || {}, d = { restaurant_id: req.params.restaurant_id, updated_at: new Date().toISOString() };
+    d.avisar_cliente = b.avisar_cliente !== undefined ? !!b.avisar_cliente : (await configDo(req.params.restaurant_id)).avisar_cliente;
+    if (b.valor_minimo_entrega !== undefined) {
+      const v = Number(String(b.valor_minimo_entrega).replace(",", "."));
+      if (!Number.isFinite(v) || v < 0 || v > 500) return res.status(400).json({ error: "Valor mínimo inválido" });
+      d.valor_minimo_entrega = r2(v);
+    }
+    const { error } = await supabase.from("entregador_config").upsert(d, { onConflict: "restaurant_id" });
     if (error) return erro(res, 500, "Não deu pra salvar", error);
     return res.json({ success: true });
   });
@@ -937,6 +1003,42 @@ supabase.from("entregadores").select("id, nome, telefone, tipo_pagamento, valor_
     } catch (err) { return erro(res, 500, "Não deu pra mandar o pedido", err); }
   });
 
+     // o caixa abre o turno quando o entregador chega
+  app.post(`${OP}/:id/abrir-turno`, async (req, res) => {
+    try {
+      const { data: e } = await supabase.from("entregadores").select("id, restaurant_id, ativo").eq("id", req.params.id).eq("restaurant_id", req.params.restaurant_id).maybeSingle();
+      if (!e || !e.ativo) return res.status(404).json({ error: "Entregador não encontrado" });
+      await garantirTurno(e);
+      await supabase.from("entregadores").update({ disponivel: true }).eq("id", e.id);
+      _cacheAtivos.delete(e.id);
+      io.to(req.params.restaurant_id).emit("entregadores_mudou");
+      io.to(`entd:${e.id}`).emit("turno_aberto");
+      return res.json({ success: true });
+    } catch (err) { return erro(res, 500, "Não deu pra abrir o turno", err); }
+  });
+
+  // ⏱️ turno parado: 2h sem entrega e sem pedido na rua → fecha sozinho (a cada 10 min, um servidor só)
+  const fecharParados = async () => {
+    if (ctx.travaUnica && !(await ctx.travaUnica("turnos-parados", 9 * 60000))) return;
+    const { data: abertos } = await supabase.from("entregador_turnos").select("id, entregador_id, restaurant_id, inicio, reaberto_em").is("fim", null);
+    for (const t of abertos || []) {
+      const desde = t.reaberto_em && depois(t.reaberto_em, t.inicio) ? t.reaberto_em : t.inicio;
+      if (Date.now() - Date.parse(desde) < 2 * 3600000) continue;
+      const [{ count: naRua }, { data: ult }] = await Promise.all([
+        supabase.from("orders").select("id", { count: "exact", head: true }).eq("entregador_id", t.entregador_id).eq("status", "delivering"),
+        supabase.from("orders").select("delivered_at").eq("entregador_id", t.entregador_id).eq("status", "finished").gte("delivered_at", desde).order("delivered_at", { ascending: false }).limit(1)
+      ]);
+      if (naRua || (ult?.[0] && Date.now() - Date.parse(ult[0].delivered_at) < 2 * 3600000)) continue;
+      const { data: fechou } = await supabase.from("entregador_turnos").update({ fim: new Date().toISOString(), encerrado_por: "automatico" }).eq("id", t.id).is("fim", null).select("id");
+      if (!fechou?.length) continue;
+      await supabase.from("entregadores").update({ disponivel: false }).eq("id", t.entregador_id);
+      _cacheAtivos.delete(t.entregador_id);
+      io.to(t.restaurant_id).emit("entregadores_mudou");
+      io.to(`entd:${t.entregador_id}`).emit("turno_encerrado", { auto: true });
+    }
+  };
+  setInterval(() => fecharParados().catch((e) => console.error("⚠️ turnos parados:", e.message)), 10 * 60000);
+   
   // o caixa encerra o turno de quem esqueceu
   app.post(`${OP}/:id/encerrar-turno`, async (req, res) => {
     try {
