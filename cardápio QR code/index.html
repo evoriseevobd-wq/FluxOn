@@ -635,7 +635,7 @@ html { scroll-behavior: smooth; }
     </div>
     <div class="form-field">
       <label class="form-label">Telefone</label>
-     <input class="form-input" id="input-phone" type="tel" placeholder="(11) 99999-9999" inputmode="tel" oninput="mascaraTelefone(this)" maxlength="15" />
+     <input class="form-input" id="input-phone" type="tel" placeholder="(11) 99999-9999" inputmode="tel" data-mask="tel" maxlength="15" />
     </div>
     <div class="form-field">
       <label class="form-label">Observações</label>
@@ -655,6 +655,7 @@ html { scroll-behavior: smooth; }
     <button class="success-back-btn" onclick="resetAll()">Fazer novo pedido</button>
   </div>
 
+  <script src="mascaras.js"></script>
   <script>
     const API_BASE = 'https://backend.evoriseai.com.br';
 
