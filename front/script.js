@@ -264,7 +264,7 @@ function getPlanPrice(plan) {
 
 // ===== PLANOS: o servidor diz o que o plano libera; no menu, o resto fica com 🔒 =====
 let PLANO_RECURSOS = null; // { crm: { ok, plano }, ... } vindo de /plano
-const PLANO_LOCAL = { entregador: "advanced", fidelidade: "advanced", crm: "advanced", vale: "advanced", estoque: "advanced", relatorios: "executive", custos: "executive" };
+const PLANO_LOCAL = { mapa_entregador: "advanced", fidelidade: "advanced", crm: "advanced", vale: "advanced", estoque: "advanced", relatorios: "executive", custos: "executive" };
 const ORDEM_PLANOS = ["essential", "advanced", "executive", "custom"];
 function temNoPlano(recurso) {
   if (PLANO_RECURSOS?.[recurso]) return !!PLANO_RECURSOS[recurso].ok;
@@ -2714,7 +2714,8 @@ function buildOrderCard(order) {
 
   const mesaLabel = order.table_number ? `· Mesa ${order.table_number}` : "";
   const isDelivery = String(order.service_type || "").toLowerCase() === "delivery";
-  const paymentText = isDelivery && order.payment_method ? order.payment_method : "";
+  const isRetirada = String(order.service_type || "").toLowerCase() === "retirada";
+  const paymentText = (isDelivery || isRetirada) && order.payment_method ? order.payment_method : "";
 
   card.innerHTML = `
     <div class="order-top">
@@ -2725,6 +2726,7 @@ function buildOrderCard(order) {
     <div class="order-card-footer">
       <div class="order-tags-row">
         ${isDelivery ? `<div class="order-delivery-tag">Delivery</div>` : ""}
+        ${isRetirada ? `<div class="order-delivery-tag">🏪 Retirada</div>` : ""}
         ${paymentText ? `<div class="order-payment-tag">${escapeHtml(paymentText)}</div>` : ""}
       ${window.entregadorTag ? entregadorTag(order) : ""}
         ${order.origin === "fidelidade" 
@@ -3982,7 +3984,8 @@ function closeCreateModal() {
   if (newDelivery) newDelivery.checked = false;
   const totalPriceField = document.getElementById("new-total-price");
   if (totalPriceField) totalPriceField.value = "";
-  // ← REMOVE a linha: if (saveCreateBtn) saveCreateBtn.dataset.editOrderId = "";
+  window.npResetFrete?.();
+  // ← REMOVE a linha
   updateCreateDeliveryVisibility();
 }
 
@@ -4074,6 +4077,9 @@ async function saveNewOrder() {
   const itens = parseItems(newItems?.value);
 const tipoPedido = saveCreateBtn?.dataset.tipo || "delivery";
   const isDelivery = tipoPedido !== "mesa";
+  const retirada = isDelivery && !!window.npRetirada?.();
+  const service_type = !isDelivery ? "local" : retirada ? "retirada" : "delivery";
+  const frete = isDelivery && !retirada ? (Number(window.npFrete?.()) || 0) : 0;
   const service_type = isDelivery ? "delivery" : "local";
   const address = String(newAddress?.value || "").trim();
   const payment_method = String(newPayment?.value || "").trim();
@@ -4088,7 +4094,7 @@ const tipoPedido = saveCreateBtn?.dataset.tipo || "delivery";
 }
 if (!rid || !client) { alert("Preencha o nome do cliente."); resetSaveBtn(); return; }
 if (!itens || itens.length === 0) { alert("Preencha os itens do pedido."); resetSaveBtn(); return; }
-if (isDelivery && !address) { alert("Endereço é obrigatório para delivery."); resetSaveBtn(); return; }
+if (isDelivery && !retirada && !address) { alert("Coloque o endereço de entrega ou marque Retirada."); resetSaveBtn(); return; }
 if (isDelivery && !payment_method) { alert("Forma de pagamento é obrigatória para delivery."); resetSaveBtn(); return; }
   const funcNovo = isDelivery && /funcion/i.test(payment_method) ? window._npFuncionario : null;   // vale funcionário: quem consumiu
 if (isDelivery && /funcion/i.test(payment_method) && !funcNovo && !editOrderId) { alert("Escolha o funcionário do vale."); resetSaveBtn(); return; }
@@ -4104,11 +4110,12 @@ const body = {
   ...(editOrderId ? {} : { chave_envio: window._chaveNovoPedido = window._chaveNovoPedido || novaChaveEnvio() }),
   notes: String(newNotes?.value || ""),
   service_type,
-  address: isDelivery ? address : null,
+  address: isDelivery && !retirada ? address : null,
+  ...(isDelivery ? { taxa_entrega: frete } : {}),
   payment_method: isDelivery ? (funcNovo ? `vale funcionário (${funcionarioNoTexto(funcNovo.nome)})` : payment_method) : null,
   ...(funcNovo ? { funcionario_id: funcNovo.id } : {}),
   // total: se o caixa não mexeu (é a soma dos itens), quem calcula é o servidor; mexeu (desconto/ajuste), vale o dele
-  ...(Math.abs(total_price - itens.reduce((t, i) => t + (Number(i.price) || 0) * (Number(i.qty) || 1), 0)) > 0.009 ? { total_price } : {}),
+  ...(Math.abs(total_price - (itens.reduce((t, i) => t + (Number(i.price) || 0) * (Number(i.qty) || 1), 0) + frete)) > 0.009 ? { total_price } : {}),
 origin: orderAtual?.origin || (tipoPedido === "mesa" || !!saveCreateBtn.dataset.mesa ? "balcao" : "balcao_delivery"),
   table_number: orderAtual?.table_number || saveCreateBtn.dataset.mesa || null,
   ...(editOrderId ? { 
@@ -4124,7 +4131,7 @@ origin: orderAtual?.origin || (tipoPedido === "mesa" || !!saveCreateBtn.dataset.
       headers: buildHeaders(),
       body: JSON.stringify({ ...body, ...(aut?.pin ? { pin: aut.pin } : {}) }),
     }), { titulo: "Desconto no total", texto: "Cobrar menos que o cardápio precisa do PIN de quem autoriza.",
-      pedirPin: body.total_price != null && Number(body.total_price) < somaItens - 0.009 });
+      pedirPin: body.total_price != null && Number(body.total_price) < somaItens + frete - 0.009 });
     if (!env) return;                                   // voltou sem autorizar: o pedido continua aberto pra mudar
     const resp = env.resp;
 
@@ -4979,11 +4986,12 @@ if (modalEditBtn) modalEditBtn.addEventListener("click", (e) => {
     const totalField = document.getElementById("new-total-price");
     if (totalField) totalField.value = order.total_price ? String(order.total_price).replace(".", ",") : "";
 
-    const isDelivery = String(order.service_type || "").toLowerCase() === "delivery";
+    const isDelivery = ["delivery", "retirada"].includes(String(order.service_type || "").toLowerCase());
     if (newDelivery) {
       newDelivery.checked = isDelivery;
       updateCreateDeliveryVisibility();
     }
+    if (isDelivery) window.npCarregarPedido?.(order);
     if (isDelivery && newAddress) newAddress.value = order.address || "";
     if (isDelivery && newPayment) newPayment.value = order.payment_method || "";
 
@@ -5087,11 +5095,12 @@ function renderItensSelecionados() {
   atualizarHiddenItems();
 }
   // total do Novo pedido = soma dos itens (cada um já com os adicionais)
+window.npRecalcTotal = () => npRecalcTotal(); // o frete.js recalcula quando o frete muda
 function npRecalcTotal() {
   const totalField = document.getElementById("new-total-price");
   if (!totalField) return;
   const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
-  totalField.value = soma > 0 ? soma.toFixed(2).replace('.', ',') : '';
+  totalField.value = soma > 0 ? (soma + (Number(window.npFrete?.()) || 0)).toFixed(2).replace('.', ',') : '';
 }
 // "+ Adicional" e observação de cada item (sem redesenhar enquanto digita)
 itensSelecionados?.addEventListener("click", async (e) => {
@@ -5119,7 +5128,7 @@ itensSelecionados?.addEventListener("input", (e) => {
   const totalField = document.getElementById("new-total-price");
   if (totalField) {
     const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
-    totalField.value = soma > 0 ? soma.toFixed(2).replace('.', ',') : '';
+totalField.value = soma > 0 ? (soma + (Number(window.npFrete?.()) || 0)).toFixed(2).replace('.', ',') : '';
   }
 };
 
@@ -5135,7 +5144,7 @@ window.setQtd = function(index, value) {
   const totalField = document.getElementById("new-total-price");
   if (totalField) {
     const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
-    totalField.value = soma > 0 ? soma.toFixed(2).replace('.', ',') : '';
+    totalField.value = soma > 0 ? (soma + (Number(window.npFrete?.()) || 0)).toFixed(2).replace('.', ',') : '';
   }
 };
 
@@ -5149,7 +5158,7 @@ window.alterarQtd = function(index, delta) {
   const totalField = document.getElementById("new-total-price");
   if (totalField) {
     const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
-    totalField.value = soma > 0 ? soma.toFixed(2).replace('.', ',') : '';
+    totalField.value = soma > 0 ? (soma + (Number(window.npFrete?.()) || 0)).toFixed(2).replace('.', ',') : '';
   }
 };
   
@@ -5223,7 +5232,7 @@ const totalField = document.getElementById("new-total-price");
 if (totalField) {
   const soma = itensPedido.reduce((acc, i) => acc + (i.price * i.qty), 0);
   if (soma > 0) {
-    totalField.value = soma.toFixed(2).replace('.', ',');
+    totalField.value = (soma + (Number(window.npFrete?.()) || 0)).toFixed(2).replace('.', ',');
   }
 }
   }
@@ -9460,7 +9469,7 @@ manterTelaAcesa();
   const escolhido = $("np-end-escolhido"), ruaEl = $("np-end-rua"), numEl = $("np-end-num"), restoEl = $("np-end-resto"), limpar = $("np-end-limpar");
   if (end && termo && lista && escolhido) {
     const nativo = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-    const gravar = (v) => nativo.set.call(end, v);   // grava sem redesenhar
+    const gravar = (v) => { nativo.set.call(end, v); queueMicrotask(() => document.dispatchEvent(new CustomEvent("np-endereco", { detail: v }))); };   // grava sem redesenhar (e avisa o frete)
     let atual = null, seq = 0, timer = null, cidadePromessa = null;
 
     const cidadeTxt = (e) => [e.cidade, e.uf].filter(Boolean).join("/");
