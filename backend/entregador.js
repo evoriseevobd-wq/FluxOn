@@ -154,8 +154,8 @@ async function ttKmIda(a, b, key) {
   const m = (await r.json()).routes?.[0]?.summary?.lengthInMeters;
   return Number.isFinite(m) ? m / 1000 : null;
 }
-// km de ida e volta (null = não deu pra calcular: sem chave do TomTom, endereço não achado ou longe demais)
-async function kmDaEntrega(o) {
+// km só de ida, loja → casa (null = não deu pra calcular: sem chave do TomTom, endereço não achado ou longe demais)
+async function kmIdaDe(o) {
   const tt = (await C.getIntegracao(o.restaurant_id, "tomtom"))?.key;
   if (!tt || !o.address) return null;
   const chave = chaveEndereco(o.address);
@@ -174,7 +174,7 @@ async function kmDaEntrega(o) {
   if (!casa) { casa = await ttGeo(o.address, tt); novo = true; }
   if (!casa) return null;
   const de = [loja.lat, loja.lng, casa.lat, casa.lng].map((n) => Number(n).toFixed(4)).join(",");
-  if (geo && geo.km_de === de && Number(geo.km_ida) > 0) return r2(Number(geo.km_ida) * 2);
+  if (geo && geo.km_de === de && Number(geo.km_ida) > 0) return r2(Number(geo.km_ida));
   const ida = await ttKmIda(loja, casa, tt);
   if (!ida || ida > 40) return null; // mais de 40 km: o endereço foi achado no lugar errado
   if (chave) {
@@ -182,8 +182,12 @@ async function kmDaEntrega(o) {
     const { error } = await C.supabase.from("enderecos_geo").upsert({ restaurant_id: o.restaurant_id, endereco_chave: chave, ...(geo ? {} : { lat: casa.lat, lng: casa.lng }), ...ponto, km_ida: r2(ida), km_de: de, atualizado_em: new Date().toISOString() }, { onConflict: "restaurant_id,endereco_chave" });
     if (error) console.error("⚠️ enderecos_geo:", error.message);
   }
-  return r2(ida * 2);
+  return r2(ida);
 }
+// ida e volta: o que o entregador por km roda
+async function kmDaEntrega(o) { const ida = await kmIdaDe(o); return ida == null ? null : r2(ida * 2); }
+// pro frete do cliente (server.js): mesmo cálculo e mesmo cache
+export const kmIdaEndereco = (rid, address) => (C ? kmIdaDe({ restaurant_id: rid, address }) : Promise.resolve(null));
 
 // o que o app do entregador recebe de cada pedido
 function pedidoParaApp(o, destino) {
@@ -250,14 +254,18 @@ async function encerrarTurno(ent, por) {
   await C.supabase.from("entregadores").update({ disponivel: false }).eq("id", ent.id);
 }
 
+// mapa da moto (Operacional, app do entregador e cliente): do Advanced pra cima
+const mapaOk = (rid) => (C.temRecurso ? C.temRecurso(rid, "mapa_entregador") : Promise.resolve(true));
 async function nomeRestaurante(rid) {
-  const [{ data: cfg }, { data: r }, tt] = await Promise.all([
+  const [{ data: cfg }, { data: r }, tt, mapa] = await Promise.all([
     C.supabase.from("restaurante_config").select("nome_exibicao, logo_url, cor_primaria, endereco, telefone").eq("restaurant_id", rid).maybeSingle(),
     C.supabase.from("restaurants").select("name").eq("id", rid).maybeSingle(),
-    C.getIntegracao(rid, "tomtom")
+    C.getIntegracao(rid, "tomtom"),
+    mapaOk(rid)
   ]);
   return { id: rid, nome: cfg?.nome_exibicao || r?.name || "Restaurante", logo_url: cfg?.logo_url || null, cor: cfg?.cor_primaria || null, endereco: cfg?.endereco || null, telefone: cfg?.telefone || null,
-    tomtom: tt?.key || null }; // chave do TomTom do restaurante (mapa e endereços); sem ela, OpenStreetMap
+    tomtom: mapa ? tt?.key || null : null, // chave do TomTom do restaurante (mapa e endereços); sem ela, OpenStreetMap
+    mapa }; // false (Essential): sem mapa, só as etapas e a lista
 }
 
 async function configDo(rid) {
@@ -383,8 +391,10 @@ async function receberPosicao(ent, p) {
   const pos = { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, precisao: Math.round(Number(p.precisao) || 0) || null, rumo: Number.isFinite(Number(p.rumo)) ? Math.round(Number(p.rumo)) : null, em: new Date(agora).toISOString() };
   _ultimaPos.set(ent.id, { ...pos, salvoEm: ult.salvoEm || 0, enviadoEm: agora });
 
-  C.io.to(ent.rid).emit("entregador_posicao", { id: ent.id, nome: ent.nome, ...pos });
-  for (const oid of await pedidosNaRua(ent.id)) C.io.to(`acomp:${oid}`).emit("posicao", pos);
+  if (await mapaOk(ent.rid)) { // Essential: a posição não sai pra ninguém (o mapa é do Advanced)
+    C.io.to(ent.rid).emit("entregador_posicao", { id: ent.id, nome: ent.nome, ...pos });
+    for (const oid of await pedidosNaRua(ent.id)) C.io.to(`acomp:${oid}`).emit("posicao", pos);
+  }
 
   if (agora - (ult.salvoEm || 0) > 15000) { // guarda no banco a cada 15s (quem abrir a página depois já vê onde está)
     _ultimaPos.get(ent.id).salvoEm = agora;
@@ -503,7 +513,7 @@ async function avisarProximo(rid, entregadorId) {
   const link = await linkRastreio(rid, prox);
   const nome = primeiroNome(prox.client_name);
   await whatsApp(rid, rest.nome, prox.client_name, prox.client_phone,
-    `🛵 ${nome ? nome + ", v" : "V"}ocê é o próximo! ${primeiroNome(ent?.nome) || "O entregador"} está indo agora até você com o pedido #${prox.order_number}.${link ? `\n\nAcompanhe no mapa: ${link}` : ""}`,
+    `🛵 ${nome ? nome + ", v" : "V"}ocê é o próximo! ${primeiroNome(ent?.nome) || "O entregador"} está indo agora até você com o pedido #${prox.order_number}.${link ? `\n\nAcompanhe ${rest.mapa ? "no mapa" : "seu pedido"}: ${link}` : ""}`,
     "proximo_da_entrega");
 }
 
@@ -517,7 +527,7 @@ async function avisarClientes(rid, ent, pedidos) {
     _jaAvisados.add(o.id);
     if (_jaAvisados.size > 5000) _jaAvisados.clear();
     const url = await linkRastreio(rid, o);
-    const link = url ? `\n\n📍 Acompanhe pelo app do ${rest.nome}:\n${url}\n\nÉ só tocar no link que o mapa abre com a moto a caminho. Entrando no app com o seu número de WhatsApp (sem senha), você vê todos os seus pedidos e junta pontos.` : "";
+    const link = url ? `\n\n📍 Acompanhe pelo app do ${rest.nome}:\n${url}\n\n${rest.mapa ? "É só tocar no link que o mapa abre com a moto a caminho." : "É só tocar no link pra ver cada etapa do seu pedido."} Entrando no app com o seu número de WhatsApp (sem senha), você vê todos os seus pedidos e junta pontos.` : "";
     const nome = primeiroNome(o.client_name);
     const pg = pagamentoInfo(o);
     const lembrete = pg.tipo === "dinheiro" && pg.troco ? `\nO ${primeiroNome(ent.nome)} já leva o seu troco.` : "";
@@ -820,13 +830,14 @@ export function registrarEntregador(ctx) {
         }
       }
       const rest = await nomeRestaurante(o.restaurant_id);
+      if (!rest.mapa) posicao = null; // Essential: só as etapas
       return res.json({
         pedido: { numero: o.order_number, cliente: primeiroNome(o.client_name), status: o.status, endereco: o.address || "", saiu_em: o.delivering_at, entregue_em: o.delivered_at, delivery: ehDelivery(o),
           recebido_em: o.confirmed_at || o.created_at, preparo_em: o.preparing_at, pronto_em: o.mounting_at, cancelado_em: o.cancelled_at, total: r2(o.total_price),
           itens: (Array.isArray(o.itens) ? o.itens : []).map((i) => ({ nome: i.name || i.nome || "Item", qtd: Number(i.qty || i.quantity || i.quantidade || 1) })) },
-        restaurante: { nome: rest.nome, logo_url: rest.logo_url, cor: rest.cor, endereco: rest.endereco, telefone: rest.telefone, tomtom: rest.tomtom },
+        restaurante: { nome: rest.nome, logo_url: rest.logo_url, cor: rest.cor, endereco: rest.endereco, telefone: rest.telefone, tomtom: rest.tomtom, mapa: rest.mapa },
         entregador, posicao, antes,
-        destino: (await destinos(o.restaurant_id, [o])).get(o.id) || null
+        destino: rest.mapa ? (await destinos(o.restaurant_id, [o])).get(o.id) || null : null
       });
     } catch (e) { return erro(res, 500, "Não deu pra carregar o pedido", e); }
   });
@@ -888,11 +899,12 @@ supabase.from("entregadores").select("id, nome, telefone, tipo_pagamento, valor_
     ]);
     if (error) return erro(res, 500, "Não deu pra carregar os entregadores", error);
     const emTurno = new Map((turnosAbertos || []).map((t) => [t.entregador_id, t.inicio]));
+    const mapa = await mapaOk(rid); // Essential: sem posição na lista
     const conectados = new Set();
     try { for (const s of await io.in(`ent:${rid}`).fetchSockets()) if (s.data?.ent?.id) conectados.add(s.data.ent.id); } catch {}
     return res.json((lista || []).map((e) => {
-      const mem = _ultimaPos.get(e.id);
-      const pos = mem && (!e.posicao_em || depois(mem.em, e.posicao_em)) ? { lat: mem.lat, lng: mem.lng, em: mem.em } : (e.lat != null ? { lat: e.lat, lng: e.lng, em: e.posicao_em } : null);
+      const mem = mapa ? _ultimaPos.get(e.id) : null;
+      const pos = !mapa ? null : mem && (!e.posicao_em || depois(mem.em, e.posicao_em)) ? { lat: mem.lat, lng: mem.lng, em: mem.em } : (e.lat != null ? { lat: e.lat, lng: e.lng, em: e.posicao_em } : null);
       const pedidos = (naRua || []).filter((o) => o.entregador_id === e.id);
       return {
         id: e.id, nome: e.nome, telefone: e.telefone, tipo_pagamento: e.tipo_pagamento, valor_diaria: r2(e.valor_diaria),
