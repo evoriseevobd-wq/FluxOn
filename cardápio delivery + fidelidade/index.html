@@ -186,7 +186,7 @@
       </div>
       <div class="field">
         <label>Telefone (WhatsApp)</label>
-        <input type="tel" id="inpTelefone" placeholder="(00) 00000-0000">
+        <input type="tel" id="inpTelefone" data-mask="tel" placeholder="(00) 00000-0000">
       </div>
       <div class="field">
         <label>Observações (opcional)</label>
@@ -202,7 +202,7 @@
       <div id="endForm">
       <div class="field">
         <label for="inpCep">CEP</label>
-        <input type="text" id="inpCep" placeholder="00000-000" inputmode="numeric" maxlength="9" autocomplete="postal-code">
+        <input type="text" id="inpCep" data-mask="cep" placeholder="00000-000" inputmode="numeric" maxlength="9" autocomplete="postal-code">
         <div class="cep-info" id="cepInfo"></div>
       </div>
       <div class="field-row">
@@ -269,7 +269,7 @@
         </div>
         <div class="field" id="trocoValorField" style="display:none;">
           <label>Troco para quanto?</label>
-          <input type="text" id="inpTrocoValor" placeholder="Ex: 50,00" inputmode="decimal">
+          <input type="text" id="inpTrocoValor" data-mask="moeda" placeholder="Ex: 50,00" inputmode="decimal">
         </div>
       </div>
 
@@ -321,12 +321,13 @@
   </div>
 </div>
 
+<script src="mascaras.js"></script>
 <script src="comum.js?v=5"></script>
 <script src="cardapio.js?v=8"></script>
 <script src="AI.js?v=8"></script>
 <script src="fidelidade.js?v=3"></script>
-<script src="login.js?v=4"></script>
-<script src="conta.js?v=6"></script>
+<script src="login.js?v=5"></script>
+<script src="conta.js?v=7"></script>
   <script src="agendamento.js?v=1"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
