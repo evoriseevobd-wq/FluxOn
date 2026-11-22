@@ -172,7 +172,6 @@ function montarTela(){
   $("menos").onclick = () => { if(RS.pessoas > 1){ RS.pessoas--; mostrarPessoas(); trocarPessoas(); } };
   $("mais").onclick = () => { if(RS.pessoas < l.max_pessoas){ RS.pessoas++; mostrarPessoas(); trocarPessoas(); } };
   montarDias();
-  $("telCliente").addEventListener("input", e => { e.target.value = mascaraTel(e.target.value); });
   $("info").textContent = `Para garantir a mesa você paga ${moeda(l.valor)} no Pix, e esse valor é descontado da sua conta no dia. Seguramos a mesa por ${l.tolerancia_min} minutos depois do horário.`;
   $("pagar").onclick = pagar;
      $("aceite").onchange = atualizarBotao;
