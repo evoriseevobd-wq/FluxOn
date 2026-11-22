@@ -3000,13 +3000,26 @@ app.post("/api/v1/pedidos", async (req, res) => {
       return sendError(res, 400, "restaurant_id e client_name são obrigatórios");
     }
 
-    const exists = await restaurantExists(restaurant_id);
+    // ⚡ o que não depende de nada vai buscar no banco tudo de uma vez (cada ida ao Supabase é uma viagem)
+    const _seguro = (p) => Promise.resolve(p).catch(() => null);
+    const _ehDelivery = finalOrigin === "cardapio_delivery" || String(service_type || "").toLowerCase() === "delivery";
+    const _chaveCedo = chaveEnvioValida(req.body?.chave_envio);
+    const _pre = {
+      existe: _seguro(restaurantExists(restaurant_id)),
+      chave: _chaveCedo && !order_id ? _seguro(pedidoPelaChave(restaurant_id, _chaveCedo)) : null,
+      cardapio: normalizedItems.length && normalizedItems.every(i => i && i.item_id != null) ? _seguro(cardapioDoRestaurante(restaurant_id)) : null,
+      func: _ehDelivery && !readAuth(req) ? _seguro(funcionamento(restaurant_id)) : null,
+      cfgEnt: _ehDelivery ? _seguro(supabase.from("restaurante_config").select("taxa_entrega, pedido_minimo").eq("restaurant_id", restaurant_id).maybeSingle()) : null,
+      rest: _seguro(supabase.from("restaurants").select("tracking_url, cardapio_delivery_url").eq("id", restaurant_id).single())
+    };
+
+    const exists = await _pre.existe;
     if (!exists) return sendError(res, 404, "Restaurante não encontrado");
 
     // 🔁 mesmo envio repetido (a internet caiu e o aparelho mandou de novo): devolve o pedido que já foi criado
     const chaveEnvio = chaveEnvioValida(req.body?.chave_envio);
     if (chaveEnvio && !order_id) {
-      const ja = await pedidoPelaChave(restaurant_id, chaveEnvio);
+      const ja = await (_pre.chave || pedidoPelaChave(restaurant_id, chaveEnvio));
       if (ja) return res.json(await respostaPedidoRepetido(ja));
     }
     // 🆔 formato novo: itens por ID (nome e preço saem do cardápio, nunca do aparelho)
@@ -3015,6 +3028,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
     // cancelar é só pelo botão de cancelar (motivo e PIN): editar o pedido não cancela
     if (order_id && ["cancelled", "canceled"].includes(String(status || ""))) return sendError(res, 400, "Para cancelar, use o botão Cancelar do pedido");
     if (normalizedItems.length && normalizedItems.every(i => i && i.item_id != null)) {
+      await _pre.cardapio; // o cardápio já veio junto com o resto (fica no cache)
       const m = await montarItensPorId(restaurant_id, normalizedItems, { precoLivre: doCaixa });
       if (m.erro) return sendError(res, 400, m.erro);
       normalizedItems = m.itens; totalPorId = m.total;
@@ -3070,7 +3084,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
         // 📅 loja fechada: delivery só entra agendado e pago no Pix (o pedido espera a hora certa)
     let agendado_para = null;
     if (ehDeliveryPublico) {
-      const func = await funcionamento(restaurant_id);
+      const func = (await _pre.func) || await funcionamento(restaurant_id);
       if (!func.aberto) {
         const ag = await agendamentoDe(restaurant_id, func);
         const abre = func.proximo ? ` Abrimos ${quandoAbreTexto(func.proximo.inicio)}.` : "";
@@ -3085,7 +3099,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
       }
     }
 
-        if (publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0) {
+        if (totalPorId === null && publico && finalOrigin !== "fidelidade" && normalizedItems.length > 0) { // por ID o cardápio já confere o pausado
       const pausado = await itemPausado(restaurant_id, normalizedItems);
       if (pausado) return sendError(res, 400, `${pausado} acabou de esgotar. Tire do carrinho para continuar.`);
     }
@@ -3122,7 +3136,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
     const comTaxa = ehDeliveryPublico || (readAuth(req)?.kind === "service" && finalOrigin === "ia_whatsapp"
       && String(service_type || "").toLowerCase() === "delivery");
     if (comTaxa) {
-      const { data: cfgEnt } = await supabase.from("restaurante_config")
+      const { data: cfgEnt } = (await _pre.cfgEnt) || await supabase.from("restaurante_config")
         .select("taxa_entrega, pedido_minimo").eq("restaurant_id", restaurant_id).maybeSingle();
       const subtotal = parseFloat(total_price) || 0;
       const minimo = Number(cfgEnt?.pedido_minimo) || 0;
@@ -3147,6 +3161,7 @@ app.post("/api/v1/pedidos", async (req, res) => {
   address: address || null,
   payment_method: payment_method || null,
   ...(funcionario_id !== undefined ? { funcionario_id } : {}),
+  ...(comTaxa ? { taxa_entrega, agendado_para } : {}),
   update_at: now
 };
 
@@ -3186,6 +3201,7 @@ const nextNumber = numData || 1;
       payment_method: payment_method || null,
      ...(funcionario_id ? { funcionario_id } : {}),
     ...(chaveEnvio ? { chave_envio: chaveEnvio } : {}),
+    ...(comTaxa ? { taxa_entrega, agendado_para } : {}),
       total_price: total_price || 0,
       origin: finalOrigin,
       destino: calcularDestino(finalOrigin),
@@ -3210,13 +3226,7 @@ const nextNumber = numData || 1;
 }
 
     if (descontoAut && resultData?.id) registrarAuditoria(restaurant_id, descontoAut.funcionario, "desconto", resultData,
-      descontoAut.valor, { de: descontoAut.de, para: descontoAut.para, edicao: !!order_id });
-    // 🛵 grava a taxa de entrega no pedido (delivery do cardápio)
-    if (comTaxa && resultData?.id) {
-      const { error: errTaxa } = await supabase.from("orders").update({ taxa_entrega, agendado_para }).eq("id", resultData.id);
-      if (errTaxa) console.error("⚠️ taxa_entrega/agendado_para não gravados:", errTaxa.message);
-      else Object.assign(resultData, { taxa_entrega, agendado_para });
-    }
+      descontoAut.valor, { de: descontoAut.de, para: descontoAut.para, edicao: !!order_id }); 
 
     // Gera código único: primeiros 8 caracteres do restaurant_id + order_number
 let trackingCode = resultData.tracking_token;
@@ -3225,11 +3235,7 @@ if (!trackingCode) {
   await supabase.from("orders").update({ tracking_token: trackingCode }).eq("id", resultData.id);
 }
 
-const { data: restData } = await supabase
-  .from("restaurants")
-  .select("tracking_url, cardapio_delivery_url")
-  .eq("id", restaurant_id)
-  .single();
+const { data: restData } = (await _pre.rest) || {};
 
 // o rastreio fica dentro do app de pedidos: https://<domínio do app>?acompanhar=CÓDIGO
 const dominioApp = String(restData?.cardapio_delivery_url || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
