@@ -183,6 +183,48 @@ const DOMINIOS_COLUNAS = ["cardapio_url", "fidelidade_url", "cardapio_delivery_u
 let _dominiosCache = null;
 let _dominiosCacheTime = 0;
 
+/* ========================================
+   🔁 VÁRIOS SERVIDORES (réplicas) — combinam entre si pelo Redis
+   - tarefa automática (aniversário, agendados, "não veio") roda em UMA réplica só;
+   - cache limpo numa réplica (cardápio, domínios) é limpo em todas;
+   - contadores (PIN errado, uso da IA) são um só pra todas.
+   Sem Redis: 1 servidor, tudo na memória, igual antes.
+======================================== */
+const redisPronto = () => REDIS_ON && pubClient?.status === "ready";
+// só uma réplica pega a vez: a trava some sozinha depois de `ms`
+async function travaUnica(nome, ms) {
+  if (!redisPronto()) return true;
+  try { return (await pubClient.set(`trava:${nome}`, String(process.pid), "PX", ms, "NX")) === "OK"; }
+  catch { return true; } // Redis piscou: melhor rodar do que parar o sistema
+}
+// contador com validade (ex.: PINs errados em 5 min, uso da IA no dia)
+const _contadores = new Map();
+async function contarUso(chave, segundos) {
+  if (redisPronto()) {
+    try { const n = await pubClient.incr(`uso:${chave}`); if (n === 1) await pubClient.expire(`uso:${chave}`, segundos); return n; } catch {}
+  }
+  const agora = Date.now(), c = _contadores.get(chave);
+  const v = c && c.ate > agora ? c : { n: 0, ate: agora + segundos * 1000 };
+  v.n++; _contadores.set(chave, v);
+  return v.n;
+}
+async function lerUso(chave) {
+  if (redisPronto()) { try { return Number(await pubClient.get(`uso:${chave}`)) || 0; } catch {} }
+  const c = _contadores.get(chave);
+  return c && c.ate > Date.now() ? c.n : 0;
+}
+async function zerarUso(chave) {
+  _contadores.delete(chave);
+  if (redisPronto()) { try { await pubClient.del(`uso:${chave}`); } catch {} }
+}
+// limpa o cache aqui e avisa as outras réplicas
+const LIMPAR_CACHE = { cardapio: () => _cardapioCache.clear(), dominios: () => { _dominiosCache = null; } };
+function limparCache(tipo) {
+  LIMPAR_CACHE[tipo]?.();
+  if (REDIS_ON) { try { io.serverSideEmit("fluxon:cache", tipo); } catch {} }
+}
+io.on("fluxon:cache", (tipo) => LIMPAR_CACHE[tipo]?.());
+
 async function getDominiosPermitidos() {
   const agora = Date.now();
   if (_dominiosCache && agora - _dominiosCacheTime < 5 * 60 * 1000) {
@@ -507,7 +549,7 @@ app.use("/api/v1/funcionarios/:restaurant_id", requireAuth, exigePlano("vale_fun
 app.use("/owner/restaurants/:restaurant_id/vales", exigePlano("vale_funcionario")); // equipe e PIN: todos os planos; vales: Executive
 // cardápio mudou (item, preço, opção, pausa, categoria, importação): o cache do pedido por ID se renova na hora
 app.use(["/api/v1/cardapio", "/api/v1/categorias", "/admin/restaurants/:id/cardapio"], (req, res, next) => {
-  if (req.method !== "GET") res.on("finish", () => _cardapioCache.clear());
+  if (req.method !== "GET") res.on("finish", () => limparCache("cardapio"));
   next();
 });
 // as telas (Operacional, Owner, apps) perguntam o que o restaurante tem
@@ -2322,7 +2364,7 @@ async function reservaNaoVeio(r) {
 // a cada 5 min: quem não chegou até o horário + tolerância vira "não veio"
 let naoVeioRodando = false;
 async function processarNaoVeio() {
-  if (naoVeioRodando) return;
+  if (naoVeioRodando || !(await travaUnica("naoveio", 4 * 60000))) return;
   naoVeioRodando = true;
   try {
     const { data } = await supabase.from("reservas_mesa").select("*").eq("status", "confirmada")
@@ -2858,7 +2900,7 @@ if (status === "finished") {
 
 // ✅ COLOCA ISSO NO LUGAR:
 if (status === "preparing") {
-  if (ordersEmImpressao.has(id)) {
+  if (ordersEmImpressao.has(id) || !(await travaUnica(`imprimir:${id}`, 60000))) {
     console.log(`⚠️ Pedido ${id} já está sendo impresso, ignorando`);
   } else {
     ordersEmImpressao.add(id);
@@ -3619,7 +3661,7 @@ app.patch("/admin/restaurants/:id/dominios", requireAdmin, async (req, res) => {
     const { error } = await supabase.from("restaurants").update(fields).eq("id", id);
     if (error) return sendError(res, 500, "Erro ao salvar domínios");
 
-    _dominiosCache = null; // ← zera o cache de 5min do CORS, como combinado
+    limparCache("dominios"); // ← zera o cache de 5min do CORS (em todas as réplicas)
 
     await logAdminAction(req.auth.email, "editar_dominios", { restaurant_id: id, fields });
     return res.json({ success: true, dominios: fields });
@@ -5258,7 +5300,7 @@ app.patch("/api/v1/restaurante/:restaurant_id/dominio", async (req, res) => {
     .eq("id", restaurant_id);
     
   if (error) return sendError(res, 500, "Erro ao salvar domínio");
-  _dominiosCache = null; // domínio novo já passa no CORS na hora
+  limparCache("dominios"); // domínio novo já passa no CORS na hora (em todas as réplicas)
   return res.json({ success: true });
 });
 
@@ -5270,7 +5312,7 @@ app.patch("/api/v1/restaurante/:restaurant_id/dominio-cardapio", async (req, res
     .update({ cardapio_url: dominio })
     .eq("id", restaurant_id);
   if (error) return sendError(res, 500, "Erro ao salvar domínio do cardápio");
-  _dominiosCache = null; // domínio novo já passa no CORS na hora
+  limparCache("dominios"); // domínio novo já passa no CORS na hora (em todas as réplicas)
   return res.json({ success: true });
 });
 
@@ -5566,7 +5608,7 @@ app.patch("/api/v1/restaurante/:restaurant_id/dominio-delivery", async (req, res
     .update({ cardapio_delivery_url: dominio })
     .eq("id", restaurant_id);
   if (error) return sendError(res, 500, "Erro ao salvar domínio do delivery");
-  _dominiosCache = null; // domínio novo já passa no CORS na hora
+  limparCache("dominios"); // domínio novo já passa no CORS na hora (em todas as réplicas)
   return res.json({ success: true });
 });
 
@@ -5934,7 +5976,7 @@ app.get("/api/v1/restaurante/:restaurant_id/agendados", requireAuth, async (req,
 });
 
 // a cada minuto: agendado que chegou na hora (horário - antecedência) vira pedido novo na cozinha
-async function liberarAgendados() {
+  if (!(await travaUnica("agendados", 50000))) return;
   try {
     const limite = new Date(Date.now() + 180 * 60 * 1000).toISOString();
     const { data: lista } = await supabase.from("orders").select("id, restaurant_id, agendado_para")
@@ -8362,7 +8404,7 @@ let aniversarioRodando = false;
 async function processarAniversarios() {
   if (aniversarioRodando) return;
   const agoraSP = new Date(Date.now() - SP_OFFSET_MS);
-  if (agoraSP.getUTCHours() < 9) return;
+  if (!(await travaUnica("aniversarios", 25 * 60000))) return;
   aniversarioRodando = true;
   try {
     const ano = agoraSP.getUTCFullYear(), mes = agoraSP.getUTCMonth() + 1, dia = agoraSP.getUTCDate();
@@ -9244,8 +9286,6 @@ app.post("/api/v1/ia/sugestao", async (req, res) => {
 
     const chaveIA = `${restaurant_id}:${new Date().toISOString().slice(0, 10)}`;
     const usoIA = (iaUso.get(chaveIA) || 0) + 1;
-    if (usoIA > IA_LIMITE_DIARIO) return res.status(429).json({ error: "Limite diário do assistente atingido" });
-    iaUso.set(chaveIA, usoIA);
 
     // Busca o cardápio ativo real — a IA só pode sugerir o que existe aqui
     const [{ data: cardapio, error }, loja, mapaAdc] = await Promise.all([
@@ -11044,15 +11084,14 @@ async function autorizar(req, rid) {
   if (!comPin.length) return { funcionario: null };          // o dono não ligou o PIN: segue só com o motivo
   const pin = String(req.body?.pin || "");
   if (!pin) return { erro: "Peça o PIN de quem autoriza", codigo: "PIN", status: 403 };
-  const e = _pinErros.get(String(rid));
-  if (e && Date.now() - e.desde < 5 * 60000 && e.n >= 5) return { erro: "Muitos PINs errados. Espere 5 minutos.", codigo: "PIN", status: 429 };
+  // 5 PINs errados em 5 min travam (contador único pra todas as réplicas)
+  if (await lerUso(`pin:${rid}`) >= 5) return { erro: "Muitos PINs errados. Espere 5 minutos.", codigo: "PIN", status: 429 };
   const f = pinValido(pin) && comPin.find(x => x.pin_hash === pinHash(rid, pin));
   if (!f) {
-    const v = e && Date.now() - e.desde < 5 * 60000 ? e : { n: 0, desde: Date.now() };
-    v.n++; _pinErros.set(String(rid), v);
+    await contarUso(`pin:${rid}`, 5 * 60);
     return { erro: "PIN incorreto", codigo: "PIN", status: 403 };
   }
-  _pinErros.delete(String(rid));
+  await zerarUso(`pin:${rid}`);
   return { funcionario: { id: f.id, nome: f.nome } };
 }
 function registrarAuditoria(rid, funcionario, acao, pedido, valor, detalhes) {
