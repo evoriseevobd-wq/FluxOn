@@ -32,7 +32,7 @@
       <label><span id="rotuloComentario">O que podemos melhorar?</span><textarea id="comentario" maxlength="500" rows="4" placeholder="Conta pra gente o que aconteceu. Lemos todas as mensagens."></textarea></label>
       <p class="vp-info">Quer que o restaurante fale com você? Deixe seu contato (opcional).</p>
       <label>Nome<input id="nomeCliente" maxlength="80" autocomplete="name"></label>
-      <label>WhatsApp<input id="telefone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="(00) 00000-0000"></label>
+      <label>WhatsApp<input id="telefone" type="tel" data-mask="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="(00) 00000-0000"></label>
     </div>
     <p class="vp-erro" id="erro"></p>
     <button type="button" class="vp-btn" id="enviar" disabled>Avalie todos os itens</button>
@@ -54,6 +54,7 @@
 
 <div class="aviso" id="aviso" hidden></div>
 
+<script src="mascaras.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
