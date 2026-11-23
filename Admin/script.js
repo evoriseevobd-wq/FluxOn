@@ -938,8 +938,20 @@ function secHorarios(el) {
 }
 
 // --- Operação
+// endereço da loja: salvo num texto só ("Rua X, 70, Bairro, Cidade/UF"), editado em partes
+function partesEndereco(txt) {
+  const t = String(txt || "").trim();
+  const m = t.match(/^(.+), ([^,]+), ([^,]+), ([^,\/]+)\/([A-Za-z]{2})$/);
+  return m ? { rua: m[1], numero: m[2], bairro: m[3], cidade: m[4], uf: m[5].toUpperCase() } : { rua: t, numero: "", bairro: "", cidade: "", uf: "" };
+}
+function juntarEndereco(p) {
+  const cidade = p.cidade && p.uf ? `${p.cidade}/${p.uf.toUpperCase()}` : p.cidade;
+  return [p.rua, p.numero, p.bairro, cidade].map(v => String(v || "").trim()).filter(Boolean).join(", ");
+}
+
 function secOperacao(el) {
   const c = S.cfg;
+  const end = partesEndereco(c.endereco);
   const listas = { online: [...(c.pagamento_online || [])], entrega: [...(c.pagamento_entrega || [])] };
   const fichas = (qual) => {
     const lista = listas[qual];
@@ -956,7 +968,14 @@ function secOperacao(el) {
         <label class="campo"><span>Telefone / WhatsApp</span><input id="f-telefone" inputmode="tel" data-mask="tel" value="${esc(c.telefone || "")}"></label>
         <label class="campo"><span>Instagram</span><input id="f-instagram" value="${esc(c.instagram || "")}" placeholder="@restaurante"></label>
       </div>
-      <label class="campo"><span>Endereço</span><input id="f-endereco" value="${esc(c.endereco || "")}" placeholder="Rua, número, bairro, cidade"></label>
+      <div class="grade">
+        <label class="campo"><span>CEP</span><input id="f-cep" inputmode="numeric" data-mask="cep" placeholder="00000-000" data-sem-barra><small id="f-cep-msg">Digite o CEP pra preencher rua, bairro e cidade.</small></label>
+        <label class="campo"><span>Rua</span><input id="f-rua" value="${esc(end.rua)}"></label>
+        <label class="campo"><span>Número</span><input id="f-numero" value="${esc(end.numero)}"></label>
+        <label class="campo"><span>Bairro</span><input id="f-bairro" value="${esc(end.bairro)}"></label>
+        <label class="campo"><span>Cidade</span><input id="f-cidade" value="${esc(end.cidade)}"></label>
+        <label class="campo"><span>UF</span><input id="f-uf" maxlength="2" value="${esc(end.uf)}"></label>
+      </div>
       <label class="campo"><span>Link de avaliação do Google</span><input id="f-google" value="${esc(c.google_avaliacao_url || "")}" placeholder="https://g.page/r/.../review"><small>Pra onde vai quem dá nota alta na pesquisa de satisfação.</small></label>
     </div>
     <div class="bloco">
@@ -980,6 +999,23 @@ function secOperacao(el) {
       <div class="campo"><span>Na entrega</span><div class="fichas" id="pag-entrega">${fichas("entrega")}</div></div>
     </div>`;
   $("btn-ia-buscar").onclick = () => janelaBuscarIA();
+    // CEP: com 8 dígitos busca no ViaCEP e preenche rua, bairro, cidade e UF
+  let cepFeito = "";
+  $("f-cep").addEventListener("input", async () => {
+    const d = $("f-cep").value.replace(/\D/g, ""), msg = $("f-cep-msg");
+    if (d.length !== 8 || d === cepFeito) return;
+    cepFeito = d; msg.textContent = "Buscando...";
+    try {
+      const j = await (await fetch(`https://viacep.com.br/ws/${d}/json/`)).json();
+      if (j.erro) { msg.textContent = "CEP não encontrado. Preencha à mão."; return; }
+      if (j.logradouro) $("f-rua").value = j.logradouro;
+      if (j.bairro) $("f-bairro").value = j.bairro;
+      $("f-cidade").value = j.localidade || ""; $("f-uf").value = j.uf || "";
+      msg.textContent = j.logradouro ? "Pronto. Confira e coloque o número." : "CEP da cidade toda: preencha rua e bairro.";
+      (j.logradouro ? $("f-numero") : $("f-rua")).focus();
+      marcarSujo();
+    } catch { msg.textContent = "Não deu pra buscar o CEP agora. Preencha à mão."; cepFeito = ""; }
+  });
   const redesenhar = (qual) => { $(qual === "online" ? "pag-online" : "pag-entrega").innerHTML = fichas(qual); };
   el.addEventListener("click", (e) => {
     const f = e.target.closest("[data-pag]"); if (!f) return;
@@ -1000,7 +1036,7 @@ function secOperacao(el) {
   S.salvar = async () => {
     const num = (id) => val(id) === "" ? null : Number(val(id));
     const corpo = {
-      telefone: val("f-telefone"), instagram: val("f-instagram"), endereco: val("f-endereco"), google_avaliacao_url: val("f-google"),
+      telefone: val("f-telefone"), instagram: val("f-instagram"), endereco: juntarEndereco({ rua: val("f-rua"), numero: val("f-numero"), bairro: val("f-bairro"), cidade: val("f-cidade"), uf: val("f-uf") }), google_avaliacao_url: val("f-google"),
       num_mesas: parseInt(val("f-mesas")) || 0, pedido_minimo: parseFloat(val("f-minimo")) || 0,
       taxa_entrega: Math.max(0, parseFloat(String(val("f-taxa")).replace(",", ".")) || 0),
       tempo_entrega_min: num("f-ent-min"), tempo_entrega_max: num("f-ent-max"),
