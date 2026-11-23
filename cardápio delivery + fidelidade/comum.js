@@ -324,3 +324,12 @@ function renderStoreStatus(){
     textEl.textContent = "Fechado no momento";
   }
 }
+
+
+/* ---------------- o que o plano do restaurante tem (pergunta uma vez só) ---------------- */
+let _planoRecursos = null;
+function planoRecursos(){
+  return _planoRecursos ||= fetch(`${CONFIG.API_BASE}/api/v1/restaurante/${RESTAURANT_ID}/plano`)
+    .then(r => (r.ok ? r.json() : null)).then(d => d?.recursos || {})
+    .catch(() => { _planoRecursos = null; return {}; }); // sem internet: pergunta de novo na próxima
+}
