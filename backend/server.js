@@ -10169,7 +10169,7 @@ app.get("/owner/restaurants/:restaurant_id/dashboard",
       timeline,
       horas,
       canais: a.canais,
-      top_produtos: topProdutos
+      top_produtos: hasPlan(plan, OWNER_RECURSOS.vendas) ? topProdutos : [] // mais vendidos e campeão de vendas: Executive
     });
   } catch (err) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
