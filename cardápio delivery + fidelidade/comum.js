@@ -274,6 +274,9 @@ const tema = RESTAURANT_CONFIG.tema || "light";
     document.documentElement.style.setProperty("--bg", RESTAURANT_CONFIG.cor_fundo);
     document.body.style.background = RESTAURANT_CONFIG.cor_fundo;
   }
+     // topo sem card: nome e endereço ficam direto no fundo, então a cor do texto acompanha o fundo
+  const _rgb = (getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [255,255,255]).map(Number);
+  document.body.classList.toggle("fundo-escuro", (0.299*_rgb[0] + 0.587*_rgb[1] + 0.114*_rgb[2]) / 255 < 0.5);
 
   // rodapé — Instagram do restaurante (mesmo dado usado na notinha impressa)
   const igUrl = instagramUrl(RESTAURANT_CONFIG.instagram);
