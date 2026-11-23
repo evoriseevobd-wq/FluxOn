@@ -649,7 +649,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
     const dicas = [
       d.period.days > 1 && melhor && melhor.revenue > 0 ? `<div class="dica-chip">${ic("trend")}<span>Melhor dia<b>${DIAS[new Date(melhor.date + "T12:00:00").getDay()]} ${fmtData(melhor.date)}</b></span></div>` : "",
       pico && pico.orders > 0 ? `<div class="dica-chip">${ic("relogio")}<span>Horário mais cheio<b>${pico.h}h às ${(pico.h + 1) % 24}h</b></span></div>` : "",
-      d.top_produtos[0] ? `<div class="dica-chip">${ic("star")}<span>Campeão de vendas<b>${esc(d.top_produtos[0].nome)}</b></span></div>` : ""
+      pode(d, "vendas") && d.top_produtos[0] ? `<div class="dica-chip">${ic("star")}<span>Campeão de vendas<b>${esc(d.top_produtos[0].nome)}</b></span></div>` : ""
     ].join("");
     return heroVendas(d) + `
       <div id="avisos-home" class="avisos-home"></div>
@@ -661,7 +661,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
         <div class="kpi"><span class="label">Cancelados</span><span class="value">${int(k.cancelados)}</span></div>
       </section>
       ${dicas ? `<section class="dicas">${dicas}</section>` : ""}
-      <div class="duas">${secProdutos(d)}${secCanais(d)}</div>`;
+<div class="duas">${pode(d, "vendas") ? secProdutos(d) : lockCard(`Os mais vendidos do período fazem parte do plano ${planoDe(d, "vendas")}.`, planoDe(d, "vendas"))}${secCanais(d)}</div>`;
   }
   function telaDinheiro(d) {
     const f = finOk() ? st.fin : null;
@@ -1539,7 +1539,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
   
   function telaPdf(d) {
     const pDre = pode(d, "dre_completa"), pRent = pode(d, "canais"), pPrev = pode(d, "previsao");
-    const secs = [["resumo", "Resumo e indicadores", true], ["grafico", "Gráfico de vendas", true], ["canais", "Vendas por canal", true], ["produtos", "Mais vendidos", true], ["dre", "DRE gerencial", pDre, "dre_completa"], ["rent", "Rentabilidade por canal", pRent, "canais"], ["prev", "Previsão de demanda", pPrev, "previsao"]];
+    const secs = [["resumo", "Resumo e indicadores", true], ["grafico", "Gráfico de vendas", true], ["canais", "Vendas por canal", true], ["produtos", "Mais vendidos", pode(d, "vendas"), "vendas"], ["dre", "DRE gerencial", pDre, "dre_completa"], ["rent", "Rentabilidade por canal", pRent, "canais"], ["prev", "Previsão de demanda", pPrev, "previsao"]];
     return nota(d.period) + `<section class="card"><h2>Escolha o que entra no relatório</h2><div class="checks">
       ${secs.map(([k, n, ok, rec]) => `<label class="check"><input type="checkbox" data-sec="${k}" ${ok ? "checked" : "disabled"}><span style="flex:1">${n}</span>${ok ? "" : `<span class="tag red">${planoDe(d, rec)}</span>`}</label>`).join("")}</div>
       <button class="btn primary" id="pdf-go" style="width:100%;margin-top:14px">Gerar PDF do período</button>
