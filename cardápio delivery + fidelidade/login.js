@@ -166,7 +166,7 @@ async function loginVerificar(){
     loginFechar();
     fidToast(`Pronto, ${String(FID.cliente?.nome || d.nome || "").split(" ")[0] || "você entrou"}! 🎉`);
     loginAtualizarBotao();
-    if(ABA_ATUAL === "fidelidade") fidRender(true); else mostrarAba("fidelidade");
+    if(FID.liberada){ if(ABA_ATUAL === "fidelidade") fidRender(true); else mostrarAba("fidelidade"); } // Essential: sem fidelidade, fica no cardápio
     if(typeof contaPerguntarNascimento === "function"){ CONTA = null; setTimeout(() => contaPerguntarNascimento(), 900); }
   }catch(err){
     fidToast(err.message, true);
