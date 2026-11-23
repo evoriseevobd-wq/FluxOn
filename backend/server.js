@@ -10168,7 +10168,7 @@ app.get("/owner/restaurants/:restaurant_id/dashboard",
       previous: { revenue: b.revenue, orders: b.orders, ticket: b.ticket },
       timeline,
       horas,
-      canais: a.canais,
+      canais: hasPlan(plan, OWNER_RECURSOS.canais_venda) ? a.canais : null,
       top_produtos: hasPlan(plan, OWNER_RECURSOS.vendas) ? topProdutos : [] // mais vendidos e campeão de vendas: Executive
     });
   } catch (err) {
