@@ -264,7 +264,7 @@ async function nomeRestaurante(rid) {
     mapaOk(rid)
   ]);
   return { id: rid, nome: cfg?.nome_exibicao || r?.name || "Restaurante", logo_url: cfg?.logo_url || null, cor: cfg?.cor_primaria || null, endereco: cfg?.endereco || null, telefone: cfg?.telefone || null,
-    tomtom: mapa ? tt?.key || null : null, // chave do TomTom do restaurante (mapa e endereços); sem ela, OpenStreetMap
+    tomtom: tt?.key || null, // chave do TomTom do restaurante (o app do entregador usa em todos os planos)
     mapa }; // false (Essential): sem mapa, só as etapas e a lista
 }
 
@@ -835,7 +835,7 @@ export function registrarEntregador(ctx) {
         pedido: { numero: o.order_number, cliente: primeiroNome(o.client_name), status: o.status, endereco: o.address || "", saiu_em: o.delivering_at, entregue_em: o.delivered_at, delivery: ehDelivery(o),
           recebido_em: o.confirmed_at || o.created_at, preparo_em: o.preparing_at, pronto_em: o.mounting_at, cancelado_em: o.cancelled_at, total: r2(o.total_price),
           itens: (Array.isArray(o.itens) ? o.itens : []).map((i) => ({ nome: i.name || i.nome || "Item", qtd: Number(i.qty || i.quantity || i.quantidade || 1) })) },
-        restaurante: { nome: rest.nome, logo_url: rest.logo_url, cor: rest.cor, endereco: rest.endereco, telefone: rest.telefone, tomtom: rest.tomtom, mapa: rest.mapa },
+        restaurante: { nome: rest.nome, logo_url: rest.logo_url, cor: rest.cor, endereco: rest.endereco, telefone: rest.telefone, tomtom: rest.mapa ? rest.tomtom : null, mapa: rest.mapa },
         entregador, posicao, antes,
         destino: rest.mapa ? (await destinos(o.restaurant_id, [o])).get(o.id) || null : null
       });
