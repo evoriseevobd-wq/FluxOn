@@ -661,7 +661,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
         <div class="kpi"><span class="label">Cancelados</span><span class="value">${int(k.cancelados)}</span></div>
       </section>
       ${dicas ? `<section class="dicas">${dicas}</section>` : ""}
-<div class="duas">${pode(d, "vendas") ? secProdutos(d) : lockCard(`Os mais vendidos do período fazem parte do plano ${planoDe(d, "vendas")}.`, planoDe(d, "vendas"))}${secCanais(d)}</div>`;
+<div class="duas">${pode(d, "canais_venda") ? secCanais(d) : lockCard(`As vendas por canal fazem parte do plano ${planoDe(d, "canais_venda")}.`, planoDe(d, "canais_venda"))}${pode(d, "vendas") ? secProdutos(d) : lockCard(`Os mais vendidos do período fazem parte do plano ${planoDe(d, "vendas")}.`, planoDe(d, "vendas"))}</div>`;
   }
   function telaDinheiro(d) {
     const f = finOk() ? st.fin : null;
@@ -1539,7 +1539,7 @@ const t = d.totals, comCustos = (st.finOv || []).filter((f) => f && f.cmv && f.c
   
   function telaPdf(d) {
     const pDre = pode(d, "dre_completa"), pRent = pode(d, "canais"), pPrev = pode(d, "previsao");
-    const secs = [["resumo", "Resumo e indicadores", true], ["grafico", "Gráfico de vendas", true], ["canais", "Vendas por canal", true], ["produtos", "Mais vendidos", pode(d, "vendas"), "vendas"], ["dre", "DRE gerencial", pDre, "dre_completa"], ["rent", "Rentabilidade por canal", pRent, "canais"], ["prev", "Previsão de demanda", pPrev, "previsao"]];
+    const secs = [["resumo", "Resumo e indicadores", true], ["grafico", "Gráfico de vendas", true], ["canais", "Vendas por canal", pode(d, "canais_venda"), "canais_venda"], ["produtos", "Mais vendidos", pode(d, "vendas"), "vendas"], ["dre", "DRE gerencial", pDre, "dre_completa"], ["rent", "Rentabilidade por canal", pRent, "canais"], ["prev", "Previsão de demanda", pPrev, "previsao"]];
     return nota(d.period) + `<section class="card"><h2>Escolha o que entra no relatório</h2><div class="checks">
       ${secs.map(([k, n, ok, rec]) => `<label class="check"><input type="checkbox" data-sec="${k}" ${ok ? "checked" : "disabled"}><span style="flex:1">${n}</span>${ok ? "" : `<span class="tag red">${planoDe(d, rec)}</span>`}</label>`).join("")}</div>
       <button class="btn primary" id="pdf-go" style="width:100%;margin-top:14px">Gerar PDF do período</button>
