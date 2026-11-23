@@ -71,6 +71,9 @@ async function fidCarregar(){
       if(await fidBuscarCliente() === "invalido") fidEsquecer();
     }catch(err){ console.warn("Fidelidade: não foi possível carregar o cliente.", err); }
   }
+  // fidelidade só do plano Advanced pra cima (o login e a conta continuam em todos os planos)
+  FID.liberada = !!(await planoRecursos()).fidelidade?.ok;
+  if(!FID.liberada) return false;
   if(!FID.cliente){
     try{
       const r = await fetch(`${CONFIG.API_BASE}/api/v1/fidelidade/${RESTAURANT_ID}/premios`);
