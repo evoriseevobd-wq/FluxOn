@@ -4080,7 +4080,6 @@ const tipoPedido = saveCreateBtn?.dataset.tipo || "delivery";
   const retirada = isDelivery && !!window.npRetirada?.();
   const service_type = !isDelivery ? "local" : retirada ? "retirada" : "delivery";
   const frete = isDelivery && !retirada ? (Number(window.npFrete?.()) || 0) : 0;
-  const service_type = !isDelivery ? "local" : retirada ? "retirada" : "delivery";
   const address = String(newAddress?.value || "").trim();
   const payment_method = String(newPayment?.value || "").trim();
   const phoneRaw = String(newPhone?.value || "").trim();
