@@ -25,7 +25,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Manrope:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="rastreio.css?v=4">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
@@ -44,29 +44,31 @@
   <div class="banner-img" id="bannerImg"></div>
 </div>
 
-<div class="store-card">
+<!-- topo da loja: card que entra na foto (logo, nome, endereço e o alfinete do mapa) + etiquetas -->
+<div class="loja-card">
   <div class="store-logo" id="brandLogo">R</div>
-  <h1 id="brandName">Carregando...</h1>
-  <div class="store-status" id="storeStatus">
-    <span class="status-dot"></span>
-    <span id="storeStatusText">Carregando horário...</span>
+  <div class="loja-txt">
+    <h1 id="brandName">Carregando...</h1>
+    <p class="store-address" id="storeAddress"></p>
   </div>
-  <p class="store-address" id="storeAddress"></p>
-
-  <div class="store-meta-row">
-    <div class="store-meta">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M8 17.5h7.5l2-6H14l-2-4H9"/><path d="M5.5 15 8 9h3"/></svg>
-      <span class="meta-label">Entrega</span>
-      <span class="meta-value" id="metaEntrega">—</span>
-    </div>
-    <div class="store-meta">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>
-      <span class="meta-label" id="metaMinimoLabel">Mínimo</span>
-      <span class="meta-value" id="metaPedidoMinimo">—</span>
-    </div>
-  </div>
+  <a class="loja-pin" id="lojaPin" href="#" target="_blank" rel="noopener" aria-label="Ver no mapa" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>
+  </a>
 </div>
-
+<div class="loja-chips">
+  <span class="loja-chip store-status" id="storeStatus"><span class="status-dot"></span><span id="storeStatusText">Carregando horário...</span></span>
+  <button type="button" class="loja-chip agendar" id="chipAgendar" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>Agendar pedido
+  </button>
+  <span class="loja-chip" id="chipTempo" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="metaEntrega"></span>
+  </span>
+  <span class="loja-chip" id="chipFrete" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="18.5" cy="17.5" r="2.5"/><path d="M8 17.5h7.5l2-6H14l-2-4H9"/><path d="M5.5 15 8 9h3"/></svg><span id="metaFrete"></span>
+  </span>
+  <span class="loja-chip" id="chipMinimo" hidden>Mín. <span id="metaPedidoMinimo"></span></span>
+</div>
+  
 <!-- FIDELIDADE (aparece quando a aba Fidelidade está aberta) -->
 <section class="fid-view" id="fidView" aria-live="polite"></section>
 
@@ -322,7 +324,7 @@
 </div>
 
 <script src="mascaras.js"></script>
-<script src="comum.js?v=6"></script>
+<script src="comum.js?v=7"></script>
 <script src="cardapio.js?v=8"></script>
 <script src="AI.js?v=9"></script>
 <script src="fidelidade.js?v=4"></script>
