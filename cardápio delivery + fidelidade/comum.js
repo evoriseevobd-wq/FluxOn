@@ -98,6 +98,7 @@ async function fetchMenu(){
   if(horariosRes.ok){
     const horariosData = await horariosRes.json();
     RESTAURANT_HORARIOS_STATUS = horariosData.status || RESTAURANT_HORARIOS_STATUS;
+    if(typeof AG !== "undefined") AG.info = horariosData.agendamento || null; // pro "Agendar pedido" do topo
   }
   RESTAURANT_CATEGORIAS = Array.isArray(RESTAURANT_CONFIG?.categorias_ordem) ? RESTAURANT_CONFIG.categorias_ordem : [];
   IS_DEMO = false;
@@ -284,26 +285,30 @@ const tema = RESTAURANT_CONFIG.tema || "light";
     igLink.style.display = "none";
   }
 
-  // endereço
+  // endereço + alfinete vermelho que abre o mapa
+  const endereco = String(RESTAURANT_CONFIG.endereco || "").trim();
   const addressEl = document.getElementById("storeAddress");
-  if(addressEl) addressEl.textContent = RESTAURANT_CONFIG.endereco || "";
-
-  // pedido mínimo
-  const metaMinimoEl = document.getElementById("metaPedidoMinimo");
-  if(metaMinimoEl){
-    const minimo = parseFloat(RESTAURANT_CONFIG.pedido_minimo || 0);
-    metaMinimoEl.textContent = minimo > 0 ? money(minimo) : "Sem mínimo";
-    const minLabel = document.getElementById("metaMinimoLabel");
-    if(minLabel) minLabel.hidden = !(minimo > 0);
+  if(addressEl) addressEl.textContent = endereco;
+  const pin = document.getElementById("lojaPin");
+  if(pin){
+    pin.hidden = !endereco;
+    if(endereco) pin.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${nome}, ${endereco}`)}`;
   }
 
-  // tempo de entrega
+  // etiquetas: tempo de entrega, frete e pedido mínimo (só aparece o que o restaurante configurou)
+  const tMin = Number(RESTAURANT_CONFIG.tempo_entrega_min), tMax = Number(RESTAURANT_CONFIG.tempo_entrega_max);
   const metaEntregaEl = document.getElementById("metaEntrega");
-  if(metaEntregaEl){
-    const min = RESTAURANT_CONFIG.tempo_entrega_min;
-    const max = RESTAURANT_CONFIG.tempo_entrega_max;
-    metaEntregaEl.textContent = (min && max) ? `${min}-${max}min` : "A combinar";
-  }
+  if(metaEntregaEl) metaEntregaEl.textContent = tMin && tMax ? `${tMin}–${tMax} min` : "";
+  const frete = Math.max(0, Number(RESTAURANT_CONFIG.taxa_entrega) || 0);
+  const metaFreteEl = document.getElementById("metaFrete");
+  if(metaFreteEl) metaFreteEl.textContent = frete > 0 ? `Frete ${money(frete)}` : "";
+  document.getElementById("chipFrete")?.toggleAttribute("hidden", !(frete > 0));
+  const minimo = parseFloat(RESTAURANT_CONFIG.pedido_minimo || 0);
+  const metaMinimoEl = document.getElementById("metaPedidoMinimo");
+  if(metaMinimoEl) metaMinimoEl.textContent = minimo > 0 ? money(minimo) : "";
+  document.getElementById("chipMinimo")?.toggleAttribute("hidden", !(minimo > 0));
+  const agendar = document.getElementById("chipAgendar");
+  if(agendar) agendar.onclick = () => document.getElementById("catNav")?.scrollIntoView({ behavior:"smooth", block:"start" });
 
   renderStoreStatus();
   document.body.style.opacity = "1";
@@ -323,6 +328,11 @@ function renderStoreStatus(){
     wrap.classList.add("closed");
     textEl.textContent = "Fechado no momento";
   }
+  // fechado: foto cinza, sem o tempo de entrega, e "Agendar pedido" se o restaurante agenda
+  const aberto = !!RESTAURANT_HORARIOS_STATUS.aberto;
+  document.querySelector(".banner-wrap")?.classList.toggle("fechado", !aberto);
+  document.getElementById("chipTempo")?.toggleAttribute("hidden", !aberto || !document.getElementById("metaEntrega")?.textContent);
+  document.getElementById("chipAgendar")?.toggleAttribute("hidden", aberto || !(typeof AG !== "undefined" && AG.info?.disponivel));
 }
 
 
