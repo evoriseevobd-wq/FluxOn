@@ -236,8 +236,7 @@ let IA_LIBERADA = false;
 async function iaLiberada(){
   if(IS_DEMO) return (IA_LIBERADA = true);
   try{
-    const r = await fetch(`${CONFIG.API_BASE}/api/v1/restaurante/${RESTAURANT_ID}/plano`);
-    IA_LIBERADA = !!(await r.json())?.recursos?.cardapio_ia?.ok;
+    IA_LIBERADA = !!(await planoRecursos()).cardapio_ia?.ok;
   }catch{ IA_LIBERADA = false; }
   if(!IA_LIBERADA){ aiBubble?.remove(); aiTooltip?.remove(); }
   return IA_LIBERADA;
