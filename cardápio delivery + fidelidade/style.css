@@ -1952,3 +1952,29 @@ body.nav-presa .cat-nav.com-fotos .cat-nome{ -webkit-line-clamp:1; font-size:11p
   body.tema-gelo .loja-chip:not(.store-status):not(.agendar){ background:rgba(255,255,255,.8); border-color:rgba(255,255,255,.95); }
 
 
+  /* ================= TOPO DA LOJA v2: logo grande no centro, sem card ================= */
+  .loja-card{
+    margin:-58px 20px 0; padding:0;
+    display:flex; flex-direction:column; align-items:center; gap:0;
+    background:none; border:0; border-radius:0; box-shadow:none; text-align:center;
+  }
+  .loja-card .store-logo{
+    width:112px; height:112px; font-size:34px;
+    border:4px solid var(--bg);
+    box-shadow:0 10px 24px -12px rgba(0,0,0,.55);
+  }
+  .loja-card h1{ margin:12px 0 0; font-family:var(--font-display); font-size:22px; line-height:1.15; color:var(--text); }
+  .loja-end{ margin:6px 0 0; max-width:320px; font-size:13px; line-height:1.6; color:var(--muted); }
+  .loja-end:has(.store-address:empty){ display:none; }
+  .loja-end .store-address{ display:inline; margin:0; font-size:inherit; color:inherit; }
+  .loja-pin{
+    display:inline-flex; vertical-align:middle; margin-left:6px;
+    width:26px; height:26px;
+  }
+  .loja-pin svg{ width:15px; height:15px; }
+  .loja-chips{ justify-content:center; margin:14px 16px 0; }
+  body.tema-gelo .loja-card{ background:none; border:0; }
+  body.fundo-escuro .loja-card h1{ color:#f2ede6; }
+  body.fundo-escuro .loja-end{ color:rgba(242,237,230,.62); }
+  body:not(.fundo-escuro) .loja-card h1{ color:#1a1814; }
+  body:not(.fundo-escuro) .loja-end{ color:#555; }
