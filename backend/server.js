@@ -3189,7 +3189,8 @@ app.post("/api/v1/pedidos", async (req, res) => {
       const minimo = Number(cfgEnt?.pedido_minimo) || 0;
       if (finalStatus === "pending" && minimo > 0 && subtotal < minimo)
         return sendError(res, 400, `Pedido mínimo: R$ ${minimo.toFixed(2).replace(".", ",")}`);
-      taxa_entrega = Math.max(0, Number(cfgEnt?.taxa_entrega) || 0);
+      // app de pedidos: taxa fixa (por km vem na Parte 2) · IA do WhatsApp: frete pelo modo do restaurante (fixo, km ou rural)
+      taxa_entrega = ehDeliveryPublico ? Math.max(0, Number(cfgEnt?.taxa_entrega) || 0) : (await calcularFrete(restaurant_id, address)).valor;
       total_price = Math.round((subtotal + taxa_entrega) * 100) / 100;
     }
     if (!comTaxa && taxaCaixa !== null) taxa_entrega = taxaCaixa; // a fidelidade não conta o frete
@@ -9157,15 +9158,18 @@ app.get("/api/v1/cardapio/:restaurant_id/item/:id", async (req, res) => {
 ======================================== */
 const soServico = (req, res, next) => (readAuth(req)?.kind === "service" ? next() : res.status(401).json({ error: "Não autorizado" }));
 
-async function n8nMontar(rid, lista, delivery) {
+async function n8nMontar(rid, lista, delivery, address = "") {
   const r = resolverPorNome(await cardapioDoRestaurante(rid), lista);
   if (r.erro) return r;
   const m = await montarItensPorId(rid, r.itens);
   if (m.erro) return { erro: m.erro };
-  const { data: cfg } = await supabase.from("restaurante_config").select("taxa_entrega, pedido_minimo").eq("restaurant_id", rid).maybeSingle();
-  const taxa = delivery ? Math.max(0, Number(cfg?.taxa_entrega) || 0) : 0;
+  const [{ data: cfg }, frete] = await Promise.all([
+    supabase.from("restaurante_config").select("pedido_minimo").eq("restaurant_id", rid).maybeSingle(),
+    delivery ? calcularFrete(rid, String(address || "").slice(0, 300)) : { valor: 0 }
+  ]);
+  const taxa = delivery ? frete.valor : 0;
   return {
-    itens: r.itens,
+    itens: r.itens, completos: m.itens,
     linhas: m.itens.map(i => ({ nome: i.name, quantidade: i.qty, preco: i.price, subtotal: _r2(i.price * i.qty) })),
     subtotal: m.total, taxa_entrega: taxa, total: _r2(m.total + taxa), pedido_minimo: Number(cfg?.pedido_minimo) || 0
   };
@@ -9187,8 +9191,9 @@ app.get("/api/v1/n8n/:restaurant_id/cardapio", soServico, async (req, res) => {
 app.post("/api/v1/n8n/:restaurant_id/montar", soServico, async (req, res) => {
   try {
     const delivery = String(req.body?.service_type || "delivery").toLowerCase() === "delivery";
-    const r = await n8nMontar(req.params.restaurant_id, req.body?.itens, delivery);
+    const r = await n8nMontar(req.params.restaurant_id, req.body?.itens, delivery, req.body?.address);
     if (r.erro) return res.json({ ok: false, erro: r.erro, opcoes: r.opcoes || [] });
+    delete r.completos;
     const falta = delivery && r.pedido_minimo > 0 && r.subtotal < r.pedido_minimo ? _r2(r.pedido_minimo - r.subtotal) : 0;
     return res.json({ ok: true, ...r, ...(falta ? { aviso: `Pedido mínimo de R$ ${r.pedido_minimo.toFixed(2).replace(".", ",")}: faltam R$ ${falta.toFixed(2).replace(".", ",")}` } : {}) });
   } catch (err) {
@@ -9201,10 +9206,10 @@ app.post("/api/v1/n8n/:restaurant_id/pedido", soServico, async (req, res) => {
   try {
     const rid = req.params.restaurant_id;
     const { itens, client_name, client_phone, address, payment_method, notes, ref } = req.body || {};
-    const service_type = String(req.body?.service_type || "delivery").toLowerCase() === "delivery" ? "delivery" : "local";
+    const service_type = String(req.body?.service_type || "delivery").toLowerCase() === "delivery" ? "delivery" : "retirada";
     if (!client_name) return res.json({ ok: false, erro: "Falta o nome do cliente" });
     if (service_type === "delivery" && !address) return res.json({ ok: false, erro: "Falta o endereço de entrega" });
-    const r = await n8nMontar(rid, itens, service_type === "delivery");
+    const r = await n8nMontar(rid, itens, service_type === "delivery", address);
     if (r.erro) return res.json({ ok: false, erro: r.erro, opcoes: r.opcoes || [] });
     // mesma conversa/mensagem → mesma chave: o n8n repetir a chamada não cria outro pedido
     const base = ref ? `${rid}|${ref}` : `${rid}|${normalizePhone(client_phone) || client_name}|${JSON.stringify(r.itens)}|${new Date().toISOString().slice(0, 13)}`;
@@ -9222,6 +9227,111 @@ app.post("/api/v1/n8n/:restaurant_id/pedido", soServico, async (req, res) => {
   } catch (err) {
     console.error("❌ n8n pedido:", err.message);
     return sendError(res, 500, "Erro ao criar pedido");
+  }
+});
+
+/* ---- IA do WhatsApp: consultar, alterar e cancelar o pedido do cliente ----
+   Só o dono do telefone mexe no próprio pedido, e só enquanto está "Recebido" (antes de ir pra cozinha:
+   a comanda da cozinha só imprime no "Em preparo"). Pago no Pix online não muda por aqui (precisa devolver). */
+const _telLocal = (t) => (normalizePhone(t) || "").replace(/^55(?=\d{10,11}$)/, "");
+const _mesmoTel = (a, b) => { const x = _telLocal(a), y = _telLocal(b); return x.length >= 10 && x === y; };
+const N8N_PODE_MEXER = ["draft", "pending", "scheduled"];
+function n8nEtapa(o) {
+  const ret = String(o.service_type || "").toLowerCase() !== "delivery";
+  return ({ draft: "Rascunho (não foi enviado)", scheduled: "Agendado", pending: "Recebido, esperando a loja começar",
+    preparing: "Em preparo", mounting: ret ? "Pronto para retirar" : "Pronto, esperando o entregador",
+    delivering: "Saiu para entrega", finished: ret ? "Retirado / finalizado" : "Entregue", cancelled: "Cancelado", canceled: "Cancelado" })[o.status] || o.status;
+}
+async function n8nLinkPedido(rid, o) {
+  if (!o.tracking_token) return null;
+  const { data: r } = await supabase.from("restaurants").select("cardapio_delivery_url").eq("id", rid).maybeSingle();
+  const dominio = String(r?.cardapio_delivery_url || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return dominio ? `https://${dominio}?acompanhar=${o.tracking_token}` : null;
+}
+const n8nResumo = async (rid, o) => ({
+  order_id: o.id, numero: o.order_number, etapa: n8nEtapa(o), status: o.status,
+  tipo: String(o.service_type || "").toLowerCase() === "delivery" ? "entrega" : "retirada",
+  itens: (o.itens || []).map(i => ({ nome: i.name || i.nome, quantidade: Number(i.qty ?? i.quantidade ?? 1) || 1 })),
+  taxa_entrega: Number(o.taxa_entrega) || 0, total: Number(o.total_price) || 0,
+  endereco: o.address || null, pagamento: o.payment_method || null,
+  feito_as: new Date(o.created_at).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }),
+  pode_alterar_ou_cancelar: N8N_PODE_MEXER.includes(o.status), acompanhar: await n8nLinkPedido(rid, o)
+});
+async function n8nPedidoDoCliente(rid, orderId, telefone) {
+  const { data: o } = await supabase.from("orders").select("*").eq("id", orderId).eq("restaurant_id", rid).maybeSingle();
+  if (!o || !_mesmoTel(o.client_phone, telefone)) return { erro: "Não achei esse pedido para este telefone" };
+  if (!N8N_PODE_MEXER.includes(o.status)) return { erro: `O pedido já está na etapa "${n8nEtapa(o)}" e não dá mais para mudar por aqui. Peça para o cliente falar com a loja.`, etapa: n8nEtapa(o) };
+  const { data: pix } = await supabase.from("cobrancas_pix").select("id").eq("tipo", "pedido").eq("referencia_id", String(o.id)).eq("status", "pago").limit(1);
+  if (pix?.length) return { erro: "Esse pedido já foi pago no Pix online. Para mudar ou cancelar, o cliente precisa falar com a loja." };
+  return { o };
+}
+
+// GET ?telefone= → pedidos do cliente nas últimas 24h (o mais novo primeiro)
+app.get("/api/v1/n8n/:restaurant_id/pedidos", soServico, async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id, tel = req.query.telefone;
+    if (_telLocal(tel).length < 10) return res.json({ ok: false, erro: "Telefone inválido" });
+    const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase.from("orders").select("*").eq("restaurant_id", rid).gte("created_at", desde)
+      .order("created_at", { ascending: false }).limit(400);
+    const meus = (data || []).filter(o => _mesmoTel(o.client_phone, tel)).slice(0, 5);
+    return res.json({ ok: true, pedidos: await Promise.all(meus.map(o => n8nResumo(rid, o))) });
+  } catch (err) {
+    console.error("❌ n8n pedidos:", err.message);
+    return sendError(res, 500, "Erro ao buscar os pedidos");
+  }
+});
+
+// POST { telefone, itens?, address?, payment_method?, notes?, service_type? } → troca só o que vier
+app.post("/api/v1/n8n/:restaurant_id/pedido/:order_id/alterar", soServico, async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id, b = req.body || {};
+    const { o, erro, etapa } = await n8nPedidoDoCliente(rid, req.params.order_id, b.telefone);
+    if (erro) return res.json({ ok: false, erro, ...(etapa ? { etapa } : {}) });
+    const tipo = b.service_type ? (String(b.service_type).toLowerCase() === "delivery" ? "delivery" : "retirada") : (String(o.service_type || "").toLowerCase() === "delivery" ? "delivery" : "retirada");
+    const delivery = tipo === "delivery";
+    const address = b.address !== undefined ? (String(b.address || "").trim().slice(0, 300) || null) : o.address;
+    if (delivery && !address) return res.json({ ok: false, erro: "Falta o endereço de entrega" });
+    const upd = { service_type: tipo, address: delivery ? address : null, update_at: new Date().toISOString() };
+    let subtotal = _r2((Number(o.total_price) || 0) - (Number(o.taxa_entrega) || 0));
+    if (Array.isArray(b.itens) && b.itens.length) {
+      const r = await n8nMontar(rid, b.itens, delivery, address);
+      if (r.erro) return res.json({ ok: false, erro: r.erro, opcoes: r.opcoes || [] });
+      upd.itens = r.completos; subtotal = r.subtotal;
+    }
+    const { data: cfg } = await supabase.from("restaurante_config").select("pedido_minimo").eq("restaurant_id", rid).maybeSingle();
+    const minimo = Number(cfg?.pedido_minimo) || 0;
+    if (delivery && minimo > 0 && subtotal < minimo) return res.json({ ok: false, erro: `Pedido mínimo de R$ ${minimo.toFixed(2).replace(".", ",")} para entrega` });
+    upd.taxa_entrega = delivery ? (await calcularFrete(rid, address)).valor : 0;
+    upd.total_price = _r2(subtotal + upd.taxa_entrega);
+    if (b.payment_method !== undefined) upd.payment_method = String(b.payment_method || "").slice(0, 120) || null;
+    if (b.notes !== undefined) upd.notes = String(b.notes || "").slice(0, 500);
+    const { data, error } = await supabase.from("orders").update(upd).eq("id", o.id).in("status", N8N_PODE_MEXER).select().maybeSingle();
+    if (error || !data) return res.json({ ok: false, erro: "A loja começou o pedido agora há pouco: não deu para alterar" });
+    emitOrderUpdate(rid, data);
+    return res.json({ ok: true, pedido: await n8nResumo(rid, data) });
+  } catch (err) {
+    console.error("❌ n8n alterar:", err.message);
+    return sendError(res, 500, "Erro ao alterar o pedido");
+  }
+});
+
+// POST { telefone, motivo? } → cancela (só antes de ir pra cozinha)
+app.post("/api/v1/n8n/:restaurant_id/pedido/:order_id/cancelar", soServico, async (req, res) => {
+  try {
+    const rid = req.params.restaurant_id, b = req.body || {};
+    const { o, erro, etapa } = await n8nPedidoDoCliente(rid, req.params.order_id, b.telefone);
+    if (erro) return res.json({ ok: false, erro, ...(etapa ? { etapa } : {}) });
+    const agora = new Date().toISOString();
+    const { data, error } = await supabase.from("orders").update({ status: "cancelled", cancelled_at: agora, update_at: agora,
+      motivo_cancelamento: String(b.motivo || "Cliente pediu pelo WhatsApp").replace(/\s+/g, " ").trim().slice(0, 200), cancelado_por: "Cliente (WhatsApp)" })
+      .eq("id", o.id).in("status", N8N_PODE_MEXER).select().maybeSingle();
+    if (error || !data) return res.json({ ok: false, erro: "A loja começou o pedido agora há pouco: não deu para cancelar" });
+    emitOrderUpdate(rid, data);
+    return res.json({ ok: true, numero: data.order_number, etapa: "Cancelado" });
+  } catch (err) {
+    console.error("❌ n8n cancelar:", err.message);
+    return sendError(res, 500, "Erro ao cancelar o pedido");
   }
 });
 
