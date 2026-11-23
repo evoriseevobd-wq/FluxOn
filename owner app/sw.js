@@ -1,10 +1,10 @@
 // FluxON Owner — service worker. Sempre tenta a rede primeiro (números sempre atualizados);
 // sem internet, abre o que ficou guardado. Mude a versão quando trocar a lista de arquivos.
-const CACHE = "fluxon-owner-v3";
-const ARQUIVOS = ["/", "/index.html", "/style.css", "/script.js", "/config.js", "/manifest.json",
+const CACHE = "fluxon-owner-v4";
+const ARQUIVOS = ["/", "/index.html", "/style.css", "/script.js", "/config.js", "/mascaras.js", "/manifest.json",
   "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/fenix-logo-png.png"];
 
-self.addEventListener("install", (e) => {
+self.addEventListener("install", (e) => {const CACHE = "fluxon-owner-v3";
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
