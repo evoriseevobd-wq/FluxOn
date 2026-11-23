@@ -9640,7 +9640,8 @@ const OWNER_RECURSOS = {
   previsao: "executive",     // previsão de demanda
     roi: "executive",          // ROI do FluxON
   operacao: "executive",     // operação e IA: status, horário de pico, tempo por etapa, desempenho da IA
-  vale_funcionario: "executive" // quanto cada funcionário consumiu no mês
+  vale_funcionario: "executive", // quanto cada funcionário consumiu no mês
+  canais_venda: "advanced"   // vendas por canal (salão x delivery) na tela Início
 };
 function ownerRecursos(plan) {
   return Object.fromEntries(Object.entries(OWNER_RECURSOS).map(([r, min]) => [r, { ok: hasPlan(plan, min), plano: OWNER_PLANO_NOME[min] }]));
